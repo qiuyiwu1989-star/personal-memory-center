@@ -46,12 +46,14 @@ class GovernanceTest(unittest.TestCase):
 
     def test_review_permissions_dates_history_and_stale_write(self):
         self.ingest();rid=self.rows()[0]['id']
-        data={'state':'verified','revision':0,'holder':'owner:q','subject_id':'owner:q','as_of':'2026-10-01','priority':'P2'}
+        data={'state':'verified','revision':0,'holder':'owner:q','subject_id':'owner:q','as_of':'2000-01-01','priority':'P2'}
         with self.assertRaises(PermissionError):review(self.store,self.agent,rid,data)
         with self.assertRaises(Invalid):review(self.store,self.owner,rid,dict(data,as_of=None))
         review(self.store,self.owner,rid,data)
         with self.assertRaises(Conflict):review(self.store,self.owner,rid,data)
         self.assertEqual(len(context(self.store,self.owner,'personal','')['records']),1)
+        from pipeline.memory_center.governance import usable
+        self.assertFalse(usable(self.rows()[0], today='1999-12-31'))
         review(self.store,self.owner,rid,dict(data,revision=1,state='historical'))
         self.assertEqual(context(self.store,self.owner,'personal','')['records'],[])
         with self.store.db() as db:
