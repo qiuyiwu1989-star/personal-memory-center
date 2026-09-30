@@ -68,6 +68,9 @@ class Store:
               operation TEXT NOT NULL, previous_id TEXT, created REAL NOT NULL);
             ''')
 
+        from .governance import setup
+        setup(self)
+
     @contextmanager
     def db(self):
         if self.dsn:
@@ -89,6 +92,12 @@ class Store:
         messages = body.get('messages')
         source_key = body.get('source_key')
         source_type = body.get('source_type', 'conversation')
+        policy = body.get('processing_policy', 'extract')
+        if policy not in ('archive', 'extract'): raise Invalid('处理策略需为 archive / extract')
+        envelope = body.get('source_metadata', {})
+        allowed = {'original_ref', 'original_date', 'author', 'locator', 'parser_version', 'parent_source_key'}
+        if not isinstance(envelope, dict) or set(envelope) - allowed or any(not isinstance(v,str) or len(v)>1000 for v in envelope.values()):
+            raise Invalid('来源元信息无效；权限由服务端取得')
         if not isinstance(source_key, str) or not 1 <= len(source_key) <= 300:
             raise Invalid('source_key 必须是稳定来源标识，1–300 字符')
         if source_type not in ('conversation', 'imported_summary', 'document'):
@@ -116,7 +125,7 @@ class Store:
         payload = encoded(normalized)
         if len(payload) > 24000:
             raise Invalid('单批上限 24,000 字符，请按会话分段')
-        digest = hashlib.sha256((source_type + payload).encode()).hexdigest()
+        digest = hashlib.sha256((source_type + payload + (encoded(envelope) if envelope else '')).encode()).hexdigest()
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             old = db.execute('SELECT s.id,j.id job_id FROM sources s JOIN jobs j ON j.source_id=s.id '
@@ -124,15 +133,17 @@ class Store:
                              (principal['owner'], scope, principal['id'], source_key, digest)).fetchone()
             if old:
                 return dict(old) | {'duplicate': True}
+            # Archival never schedules a model call. Extraction is a separate explicit policy.
             pending = db.execute("SELECT count(*) AS n FROM jobs j JOIN sources s ON s.id=j.source_id WHERE s.owner=? AND j.state IN ('received','processing')", (principal['owner'],)).fetchone()['n']
-            if pending >= 50:
+            if policy == 'extract' and pending >= 50:
                 raise Invalid('待处理队列已达50批，请等待处理后再提交')
             sid, jid = uid(), uid()
             db.execute('INSERT INTO sources VALUES(?,?,?,?,?,?,?,?,?,?)',
                        (sid, principal['owner'], scope, source_key, digest, source_type,
                         principal['id'], int(bool(principal.get('trusted_user'))), payload, time.time()))
             db.execute('INSERT INTO jobs(id,source_id,state,created) VALUES(?,?,?,?)',
-                       (jid, sid, 'received', time.time()))
+                       (jid, sid, 'archived' if policy == 'archive' else 'received', time.time()))
+            db.execute('INSERT INTO source_envelopes VALUES(?,?,?)', (sid, encoded(envelope), policy))
             return {'id': sid, 'job_id': jid, 'duplicate': False}
 
     def process_one(self, model):
@@ -215,7 +226,11 @@ class Store:
                     + ('' if history else "AND r.lifecycle='active' ") + 'ORDER BY r.created DESC', (principal['owner'], scope))]
             jobs = [dict(r) for r in db.execute('SELECT j.*,s.payload source_payload,s.source_key FROM jobs j JOIN sources s ON s.id=j.source_id '
                     'WHERE s.owner=? AND s.scope=? ORDER BY j.created DESC LIMIT 40', (principal['owner'], scope))]
+        from .governance import metadata
+        with self.db() as db:
+            governed = {r['record_id']: dict(r) for r in db.execute('SELECT g.* FROM record_governance g JOIN records r ON r.id=g.record_id WHERE r.owner=? AND r.scope=?', (principal['owner'], scope))}
         for row in rows:
+            row['governance'] = metadata(row, governed.get(row['id']))
             messages = json.loads(row.pop('source_payload'))
             evidence = next((m for m in messages if m['id'] == row['message_id']), {})
             row['source_title'] = evidence.get('source_title', row['source_key'])

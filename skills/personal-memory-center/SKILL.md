@@ -12,12 +12,13 @@ claim that a proposed interface exists.
 ## Read progressively
 
 1. Self-contained tasks or fresh conversation context: zero memory calls.
-2. If personal background is necessary, call `memory_search` with a specific query,
+2. If personal background is necessary, call `memory_context` with a specific query,
    authorized scope and explicit `max_chars=1600`.
 3. Expand only when the task needs more: targeted search, then 1–2 matching source
-   messages with `memory_source_get`. Deep review may require more evidence.
+   messages with `memory_source_get`. Use `memory_search` to investigate candidates,
+   preserving their governance state; it is not a verified context feed. Deep review may require more evidence.
 4. `memory_document_get` with empty topic_id lists metadata. A specified topic currently
-   returns a whole MD; use it only for explicit review, never default broad loading.
+   returns a bounded page; pass offset/ max_chars and expand only when necessary.
 
 Keep historical statements, assistant advice, external views, imported summaries and
 owner corrections distinct. A quote match does not prove a model's interpretation,
@@ -31,7 +32,9 @@ Preserve ids, original roles and source dates. Reuse source_key for retries;
 do not turn assistant content into user testimony. Split larger input at message
 boundaries and retain source-part linkage.
 
-Imports trigger model extraction and may incur tokens. Check `memory_import_status`
+Imports default to `processing_policy=archive`, which calls no model.
+Only explicitly requested `processing_policy=extract` triggers extraction and incurs tokens.
+Preserve original_ref, locator, parser_version and parent_source_key in source_metadata. Check `memory_import_status`
 at a meaningful point; received is not completed. Avoid repeated polling or automatic
 costly retries. Large archives use the dedicated private archive/batch workflow,
 not one enormous tool call. Do not raise an existing token limit without authorization.

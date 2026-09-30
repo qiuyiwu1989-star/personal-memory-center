@@ -51,7 +51,7 @@
     for(const item of data.materials){
       const card=node('article',undefined,'record topic-tile');
       card.append(node('h3',item.title||'未命名资料'),node('p',new Date(item.created*1000).toLocaleString('zh-CN')+' · '+item.message_count+' 段内容 · '+item.scope,'muted'));
-      const state=item.state==='applied'?'已完成提炼 · '+item.claim_count+' 条记忆':item.state==='failed'?'处理失败':item.state==='processing'?'正在提炼':'等待处理';
+      const state=item.state==='archived'?'原文已归档 · 未调用模型':item.state==='applied'?'已完成提炼 · '+item.claim_count+' 条记忆':item.state==='failed'?'处理失败':item.state==='processing'?'正在提炼':'等待处理';
       card.append(node('span',state,'tag'),node('p',item.preview||'无文字预览','material-preview'));
       if(item.method_version!=='legacy')card.append(node('p','提炼方法 '+item.method_version,'muted'));
       const buttons=node('div',undefined,'tile-actions'),read=node('button','查看原文');
@@ -116,6 +116,7 @@
         const card=node('article',undefined,'record memory-tile');card.dataset.topic=r.topic;card.dataset.status=r.status;card.dataset.lifecycle=r.lifecycle;
         [labels[r.topic]||r.topic,r.message_id==='correction'?'本人明确纠正':(labels[r.status]||r.status),labels[r.lifecycle]||r.lifecycle,'v'+r.revision,...(r.source_date?[r.source_date.slice(0,10)]:[]),...(r.processing_method==='session_agent'?['会话 Agent 整理']:r.processing_method==='llm'?['后台模型提炼']:[])].forEach(t=>card.append(node('span',t,'tag')));
         card.append(node('p',({user:'本人',assistant:'AI 助手'}[r.subject]||r.subject),'muted'),node('p',r.statement,'statement'));
+        if(r.governance){const g=r.governance;const states={candidate:'待核实候选',verified:'已核实',historical:'历史判断',rejected:'不采纳',owner_corrected:'本人纠正'};card.append(node('p',(states[g.state]||g.state)+' · '+g.priority+' · 成立时间：'+(g.as_of||'未知'),'muted'));}
         if(r.review_note) card.append(node('p','与旧记忆对照：'+r.review_note,'muted'));
         const details=node('details'); details.append(node('summary','查看原文证据与来源'),node('blockquote',r.quote),node('p','来源：'+(r.source_title||r.source_id)+' · '+(r.source_date||'时间未记录')+' / '+(r.source_key||r.source_id)+' / 消息 '+r.message_id,'muted'));card.append(details);
         if(identity.can_correct && identity.actions.includes('write') && r.lifecycle==='active') {

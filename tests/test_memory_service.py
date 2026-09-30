@@ -37,7 +37,7 @@ class ServiceTest(unittest.TestCase):
                 return c.post('/mcp/',headers=h,json={'jsonrpc':'2.0','id':i,'method':method,'params':params}).json()
             r=rpc('initialize',{'protocolVersion':'2025-11-25','capabilities':{},'clientInfo':{'name':'test','version':'1'}})
             self.assertIn('result',r)
-            r=rpc('tools/list',{});self.assertEqual(len(r['result']['tools']),5)
+            r=rpc('tools/list',{});self.assertEqual(len(r['result']['tools']),6)
             r=rpc('tools/call',{'name':'memory_search','arguments':{'query':'hello'}})
             self.assertFalse(r['result'].get('isError',False))
             r=rpc('tools/call',{'name':'memory_import','arguments':{'source_key':'test','messages':[{'id':'1','role':'user','text':'test'}]}})

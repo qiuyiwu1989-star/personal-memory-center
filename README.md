@@ -26,13 +26,13 @@ Source-backed, attributable, time-aware, correctable context for humans and agen
 
 | 已实现 | 仍需实现与评测 |
 |---|---|
-| SQLite 本地库、PostgreSQL 适配器、来源与幂等队列 | 主张者/实体/有效时间的结构化治理字段与回填 |
+| SQLite 本地库、PostgreSQL 适配器、来源与幂等队列 | 完整实体登记、语义核实与生产回填 |
 | 模型适配、逐字引文校验、角色状态区分 | 语义支持检查、长期价值评测与冲突治理 |
-| 明确纠正、旧版留存、主题 MD 投影 | 可审阅的重跑差异与独立治理状态 |
-| 5 个限范围 Bearer MCP 工具、REST 与本地管理界面 | 短任务上下文工具、主题正文分页与精确 token 预算 |
+| 明确纠正、旧版留存、独立治理状态与重跑差异预览 | 完整重跑应用及按治理状态生成小主题 MD |
+| 6 个限范围 Bearer MCP 工具、REST、治理审核、短上下文与 MD 分页 | 统一模型预算、完整重跑应用与精确 token 预算 |
 | Claude 归档/分段/预算队列、只读结构审计 | 多 Agent 纠正一致性与完整模型成本评测 |
 
-`active` 表示旧实现中可检索，**不等于当前有效或语义已核实**。搜索可能返回候选；主题读取目前可能返回整篇大文档。集成时须保留状态、日期和来源，客户端显式设置短搜索预算，不默认读取全部主题。
+`active` 表示旧实现中可检索，**不等于当前有效或语义已核实**。搜索可能返回候选；主题正文现在按字符预算分页。集成时须保留状态、日期和来源，客户端显式设置短搜索预算，不默认读取全部主题。
 
 ## 本地运行
 
@@ -69,10 +69,11 @@ QIU_MEMORY_ORIGIN=http://127.0.0.1:5078 \
 
 | 工具 | 用途 |
 |---|---|
-| `memory_search` | 限范围短检索，建议显式传 `max_chars=1600` |
+| `memory_context` | 仅已核实/本人纠正的短上下文，默认 1600 字符，不调用模型 |
+| `memory_search` | 包含治理状态的候选检索；不当作当前事实 |
 | `memory_document_get` | 主题目录或正文；当前正文无分页，谨慎显式调用 |
 | `memory_source_get` | 单消息原文；需额外 `source_read` |
-| `memory_import` | 小批资料入队；提炼会使用模型 tokens |
+| `memory_import` | 小批资料默认仅归档；显式 extract 才入模型队列 |
 | `memory_import_status` | 任务状态；入队不等于处理完成 |
 
 客户端工作流见 [Skill](skills/personal-memory-center/SKILL.md)。尚无 OAuth 自动发现，亦不自动同步 ChatGPT 内置记忆。

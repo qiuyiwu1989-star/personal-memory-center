@@ -85,6 +85,12 @@ def blueprint(store, grants, model, browser_principal=None):
         except ValueError:raise Invalid('分页范围无效') from None
         return jsonify(store.materials(g.memory_principal,offset))
 
+    @bp.post('/materials/<source_id>/extraction-preview')
+    def extraction_preview(source_id):
+        from .reprocessing import preview
+        data = body()
+        return jsonify(preview(store,g.memory_principal,source_id,data.get('plan'),data.get('method_version')))
+
     @bp.get('/materials/<source_id>')
     def material(source_id):
         return jsonify(store.material(g.memory_principal,source_id))
@@ -93,6 +99,18 @@ def blueprint(store, grants, model, browser_principal=None):
     def records():
         return jsonify(store.snapshot(g.memory_principal, request.args.get('scope', 'personal'),
                         request.args.get('q', ''), request.args.get('history') == '1'))
+
+    @bp.post('/records/<record_id>/governance')
+    def govern(record_id):
+        from .governance import review
+        return jsonify(review(store, g.memory_principal, record_id, body()))
+
+    @bp.get('/task-context')
+    def task_context():
+        from .governance import context
+        try: budget = int(request.args.get('max_chars', '1600'))
+        except ValueError: raise Invalid('读取预算无效') from None
+        return jsonify(context(store, g.memory_principal, request.args.get('scope','personal'), request.args.get('q',''), budget))
 
     @bp.get('/documents')
     def documents():

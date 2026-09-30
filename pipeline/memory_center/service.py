@@ -62,19 +62,28 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
         if not 500<=max_chars<=16000:raise ValueError('max_chars must be 500–16000')
         result=store.snapshot(principal(ctx),scope,query);items=[];used=0
         for row in result['records']:
-            item={k:row[k] for k in ('id','statement','subject','status','source_id','message_id','source_date','revision')}
+            item={k:row[k] for k in ('id','statement','subject','status','source_id','message_id','source_date','revision','governance')}
             size=len(encoded(item))
             if used+size>max_chars:continue
             items.append(item);used+=size
         return {'records':items,'total':result['total'],'truncated':len(items)<result['total']}
 
     @mcp.tool()
-    def memory_document_get(ctx:Context, scope:str='personal', topic_id:str='')->dict:
+    def memory_context(query:str, ctx:Context, scope:str='personal', max_chars:int=1600)->dict:
+        """Load bounded verified or owner-corrected task context; no model calls."""
+        from .governance import context
+        return context(store, principal(ctx), scope, query, max_chars)
+
+    @mcp.tool()
+    def memory_document_get(ctx:Context, scope:str='personal', topic_id:str='', offset:int=0, max_chars:int=4000)->dict:
         """List topic metadata or read one topic's latest Markdown and version."""
+        if type(offset) is not int or offset < 0 or not 500 <= max_chars <= 16000: raise ValueError('Invalid paging budget')
         docs=build_documents(store,principal(ctx),scope)
         if topic_id:
             for doc in docs:
-                if doc['slug']==topic_id:return {k:doc[k] for k in ('slug','title','revision','markdown')}
+                if doc['slug']==topic_id:
+                    from .reading import page
+                    return page(doc, offset, max_chars)
             raise ValueError('Topic not found')
         return {'documents':[{k:d[k] for k in ('slug','title','revision','claims')} for d in docs]}
 
@@ -91,9 +100,9 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
         raise ValueError('Message not found')
 
     @mcp.tool()
-    def memory_import(source_key:str,messages:list[dict],ctx:Context,scope:str='personal',source_type:str='document')->dict:
-        """Submit up to 100 messages/24000 serialized characters for automatic LLM extraction; incurs model tokens. Preserve message ids/roles. Reuse stable source_key for retries. No archive or bulk upload implied."""
-        return store.ingest(principal(ctx),{'scope':scope,'source_key':source_key,'messages':messages,'source_type':source_type})
+    def memory_import(source_key:str,messages:list[dict],ctx:Context,scope:str='personal',source_type:str='document',processing_policy:str='archive',source_metadata:dict|None=None)->dict:
+        """Archive up to 100 messages/24000 serialized characters by default without LLM calls. Explicit extract policy incurs model tokens. Preserve message ids/roles. Reuse stable source_key for retries. No archive or bulk upload implied."""
+        return store.ingest(principal(ctx),{'scope':scope,'source_key':source_key,'messages':messages,'source_type':source_type,'processing_policy':processing_policy,'source_metadata':source_metadata or {}})
 
     @mcp.tool()
     def memory_import_status(job_id:str,ctx:Context)->dict:
