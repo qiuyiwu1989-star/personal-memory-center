@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-memory-center"
+version = "0.1.0"
+description = "Source-backed personal memory with lightweight Skill and MCP access"
+requires-python = ">=3.11"
+dynamic = ["dependencies"]
+
+[project.scripts]
+memory-center = "pipeline.memory_center.__main__:main"
+memory-audit = "pipeline.memory_center.audit:main"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["pipeline*"]
+
+# The dashboard is served from this checkout. Wheel installations provide
+# the backend/CLI; use a checkout for the included UI.

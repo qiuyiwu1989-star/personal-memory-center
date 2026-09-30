@@ -1,0 +1,12 @@
+const assert=require('node:assert/strict');
+const {decode}=require('../assets/memory-files.js');
+const b=s=>new TextEncoder().encode(s);
+assert.equal(decode('notes.md',b('你好\n# 主题')),'你好\n# 主题');
+assert.equal(decode('notes.JSON',b('{"message":"<script>"}')),'{"message":"<script>"}');
+assert.throws(()=>decode('notes.pdf',b('text')),/暂时支持/);
+assert.throws(()=>decode('a.json',b('{')),/JSON/);
+assert.throws(()=>decode('a.txt',new Uint8Array([0xff])),/UTF-8/);
+assert.throws(()=>decode('a.txt',b(' ')),/为空/);
+assert.throws(()=>decode('a.txt',b('a'.repeat(20001))),/20,000/);
+assert.throws(()=>decode('a.txt',b('a\0b')),/二进制/);
+console.log('8 file validation checks passed');

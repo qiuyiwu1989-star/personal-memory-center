@@ -1,0 +1,159 @@
+"""Deterministic topic Markdown projections; originals and records remain authoritative."""
+import difflib
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import unicodedata
+from .core import Invalid, permit, encoded
+
+
+def normalize(text):
+    return re.sub(r'\s+', '', unicodedata.normalize('NFKC', text)).strip('。.!！')
+
+
+def literal(text):
+    """Keep source text as text, even in exported Markdown."""
+    text = str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    return re.sub(r'([\\`*_{}\[\]#|])', r'\\\1', text).replace('\n', ' ')
+
+
+def setup(store):
+    with store.db() as db:
+        db.executescript('''
+        CREATE TABLE IF NOT EXISTS document_topics(
+          owner TEXT, scope TEXT, slug TEXT, title TEXT, prefixes TEXT,
+          PRIMARY KEY(owner,scope,slug));
+        CREATE TABLE IF NOT EXISTS document_versions(
+          owner TEXT, scope TEXT, slug TEXT, revision INTEGER, digest TEXT,
+          markdown TEXT, changes TEXT, created REAL,
+          PRIMARY KEY(owner,scope,slug,revision));
+        ''')
+
+
+def define_topic(store, principal, scope, slug, title, source_prefixes):
+    permit(principal, scope, 'write')
+    if not principal.get('trusted_user'):
+        raise PermissionError('仅本人可设置主题范围')
+    if not isinstance(slug, str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,79}', slug):
+        raise Invalid('主题标识无效')
+    if not isinstance(title, str) or not 1 <= len(title) <= 120:
+        raise Invalid('主题标题无效')
+    if not isinstance(source_prefixes, list) or not source_prefixes or not all(isinstance(p,str) and 1 <= len(p) <= 300 for p in source_prefixes):
+        raise Invalid('主题需指定来源前缀')
+    setup(store)
+    with store.db() as db:
+        db.execute('INSERT INTO document_topics VALUES(?,?,?,?,?) ON CONFLICT(owner,scope,slug) '
+                   'DO UPDATE SET title=excluded.title,prefixes=excluded.prefixes',
+                   (principal['owner'],scope,slug,title,encoded(source_prefixes)))
+
+
+def render(topic, rows):
+    by_id = {r['id']:r for r in rows}
+    prefixes = json.loads(topic['prefixes'])
+    def belongs(row):
+        seen=set()
+        while row.get('supersedes') and row['supersedes'] in by_id and row['id'] not in seen:
+            seen.add(row['id']); row=by_id[row['supersedes']]
+        if topic['slug'].startswith('history-') and topic['scope']=='claude:history':
+            if row['topic']!=topic['slug'][len('history-'):]:
+                return False
+        return any(row['source_key'].startswith(p) for p in prefixes)
+    records=sorted((r for r in rows if belongs(r)),key=lambda r:(r['created'],r['id']))
+    groups={}
+    for r in records:
+        if r['lifecycle']!='active':
+            continue
+        # Only identical normalized assertions with same attribution merge; no semantic guessing.
+        key=(r['status'],r['kind'],normalize(r['subject']),normalize(r['statement']))
+        groups.setdefault(key,[]).append(r)
+    refs={r['id']:'S'+str(i+1) for i,r in enumerate(records)}
+    sections={'本人明确纠正':[], '历史陈述与要求':[], 'AI 发言与建议（未经本人确认）':[], '导入摘要（尚未回查原话）':[]}
+    for group in groups.values():
+        r=group[-1]
+        section=('本人明确纠正' if r['message_id']=='correction' else 'AI 发言与建议（未经本人确认）'
+                 if r['status']=='agent_suggested' else '导入摘要（尚未回查原话）'
+                 if r['status']=='imported_summary' else '历史陈述与要求')
+        date=(r.get('source_date') or '')[:10] or '原始日期未记录'
+        refs_text=' '.join('['+refs[x['id']]+']' for x in group)
+        sections[section].append('- '+literal(r['statement'])+'（'+date+'） '+refs_text)
+    lines=['---','id: '+topic['slug'],'title: '+json.dumps(topic['title'],ensure_ascii=False),
+           'scope: '+json.dumps(topic['scope'],ensure_ascii=False),'format: memory-topic-v1','---','',
+           '# '+literal(topic['title']),'',
+           '> 本文由有来源的抽取记录自动生成，尚未逐条核验语义。历史陈述不代表今天的状态；AI 发言不等于本人观点，也不授予行动权限。',
+           '> 在工作台纠正来源记录后，本文自动更新。直接改此导出文件不会回写数据库。','',
+           '## 阅读入口','',
+           f'当前收录 {len(groups)} 项不同陈述；来源范围由主题规则限定。需要接手时先读要求，再核对变化与来源。',
+           '当前实现、进度和未完成事项若无近期直接证据，应重新核实，不能从旧计划推断。','']
+    for name,items in sections.items():
+        if items:
+            lines += ['## '+name,'']+items+['']
+    lines += ['## 重要变化','']
+    corrections=[r for r in records if r.get('supersedes')]
+    if not corrections:
+        lines += ['尚无明确纠正记录。不同来源的矛盾陈述仍并列保留，不按日期自动裁决。','']
+    else:
+        for r in corrections:
+            old=by_id.get(r['supersedes'])
+            lines.append('- v'+str(r['revision'])+'：'+literal(old['statement'] if old else '前一版本')+' → '+literal(r['statement'])+' ['+refs[r['id']]+']')
+        lines.append('')
+    lines += ['## 来源与版本','']
+    for r in records:
+        lines += ['### '+refs[r['id']], '',
+                  '- 标题：'+literal(r['source_title']),
+                  '- 原始日期：'+literal(r.get('source_date') or '未记录'),
+                  '- 来源键：'+literal(r['source_key']),
+                  '- 消息：'+literal(r['message_id']),
+                  '- 记录：'+r['id']+' / v'+str(r['revision'])+' / '+r['lifecycle'],
+                  '- 性质：'+r['status'],
+                  '> '+literal(r['quote']),'']
+    dependencies=[{'id':r['id'],'revision':r['revision'],'lifecycle':r['lifecycle']} for r in records]
+    return '\n'.join(lines), dependencies, len(groups)
+
+
+def build_documents(store, principal, scope, query=''):
+    permit(principal, scope, 'read')
+    if not isinstance(query,str) or len(query)>500:
+        raise Invalid('查询上限500字符')
+    setup(store)
+    import time
+    results=[]
+    # Acquire write lock before taking the authoritative snapshot; corrections cannot race projection.
+    with store.db() as db:
+        db.execute('BEGIN IMMEDIATE')
+        topics=db.execute('SELECT * FROM document_topics WHERE owner=? AND scope=? ORDER BY slug',
+                          (principal['owner'],scope)).fetchall()
+        rows=store.snapshot(principal,scope,history=True,limit=1000000)['records']
+        for topic in topics:
+            markdown,deps,count=render(dict(topic),rows)
+            digest=hashlib.sha256(markdown.encode()).hexdigest()
+            old=db.execute('SELECT * FROM document_versions WHERE owner=? AND scope=? AND slug=? ORDER BY revision DESC LIMIT 1',
+                           (principal['owner'],scope,topic['slug'])).fetchone()
+            changed=not old or old['digest']!=digest
+            revision=(old['revision'] if old else 0)+int(changed)
+            if changed:
+                diff='\n'.join(difflib.unified_diff((old['markdown'] if old else '').splitlines(),markdown.splitlines(),
+                       fromfile='v'+str(revision-1),tofile='v'+str(revision),lineterm=''))
+                db.execute('INSERT INTO document_versions VALUES(?,?,?,?,?,?,?,?)',
+                           (principal['owner'],scope,topic['slug'],revision,digest,markdown,diff,time.time()))
+            else:
+                diff=old['changes']
+            # Export is a disposable projection, kept outside the website. Atomic replacement.
+            namespace=hashlib.sha256(encoded([principal['owner'],scope]).encode()).hexdigest()[:24]
+            folder=store.directory/'documents'/namespace
+            folder.mkdir(parents=True,exist_ok=True,mode=0o700)
+            target=folder/(topic['slug']+'.md')
+            if not target.exists() or target.read_text()!=markdown:
+                import tempfile
+                fd,tmp=tempfile.mkstemp(prefix='projection-',dir=folder)
+                try:
+                    with os.fdopen(fd,'w') as file:file.write(markdown)
+                    os.replace(tmp,target)
+                finally:
+                    if os.path.exists(tmp):os.unlink(tmp)
+            if query.strip() and query.casefold() not in (topic['title']+'\n'+markdown).casefold():
+                continue
+            results.append({'slug':topic['slug'],'title':topic['title'],'revision':revision,'digest':digest,
+                            'markdown':markdown,'changes':diff,'claims':count,'dependencies':deps,'export_path':str(target)})
+    return results

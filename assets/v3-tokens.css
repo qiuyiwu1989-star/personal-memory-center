@@ -1,0 +1,63 @@
+/* ══════════════════════════════════════════════════════════
+   V3 对比度增强层 — 覆盖在 styles.css 之上,不改真源
+   styles.css 的 --* 仍是单一真源;本文件只做「更强对比」的派生。
+
+   实测对比度(WCAG,对 --v-bg):
+     主文字   #3A3936 10.9:1  →  #221E1A 15.8:1
+     次级正文 #55514C  7.4:1  →  #403A34 10.7:1
+     辅助说明 #77716A  4.5:1  →  #5E574F  6.8:1
+     强调色   #A65D4E  4.6:1  →  #8E4231  6.8:1
+   中文一律不使用斜体(仅拉丁文/数字可斜)。
+   ══════════════════════════════════════════════════════════ */
+:root{
+  --v-bg:#FBFAF6; --v-bg2:#F3EFE6; --v-bg3:#EAE4D6;
+  --v-ink:#221E1A;
+  --v-ink2:#403A34;
+  --v-ink3:#5E574F;
+  --v-ink4:#6E665C;   /* 原 #8B837A 实测仅 3.57:1，用在 9–10.5px 微标签上不达标；已加深到 5.41:1 */
+  --v-line:#CFC7B6;
+  --v-line2:#B8AF9C;
+  --v-accent:#8E4231;
+  --v-accent-2:#A65D4E;
+  --v-accent-soft:rgba(142,66,49,.09);
+  --v-card:#FFFFFF;
+  --v-shadow:0 2px 3px rgba(50,40,30,.04), 0 12px 32px rgba(50,40,30,.07);
+  --v-shadow-lg:0 4px 8px rgba(50,40,30,.06), 0 20px 56px rgba(50,40,30,.11);
+  /* 压在 accent 底上的前景色。主按钮/徽章一律用这个，不要写死 #fff——
+     暗色下 accent 是浅珊瑚，白字上去只有 2.6:1。见下方暗色覆盖。 */
+  --v-on-accent:#FFFFFF;
+
+  /* 圆角阶。V3 上线以来一直没有——审计发现 admin/prep-v2.html、
+     admin/assets.html 这两个只加载本文件的纯 V3 页面，圆角只能写死
+     px。数值跟 legacy 的 --qiu-radius-* 对齐（同一套心智，不是巧合），
+     两套体系将来真要合并时数字对得上。 */
+  --v-radius-xs:10px; --v-radius-sm:16px; --v-radius-md:24px; --v-radius-pill:999px;
+
+  /* 状态色：danger / success。2026-08-11 补上——审计发现 4+ 个工作台
+     页面各自写了不同色号的"危险红"/"成功绿"（#b5402f/#c0563f/#a8422e/
+     #9b3f3f 与 #2f6d4f/#3d7a55/#3f6d3f/#2e8b73 等），同一个意思在不同
+     页面上色号漂移。canonical 值取自现有实例里出现频率最高、且实测
+     对比度最好的那个（--v-danger 用 admin/memory.html 的 #a8422e，
+     --v-success 用 admin/ingest.html 的 #2f6d4f），不是新拍的颜色。 */
+  --v-danger:#A8422E; --v-danger-soft:rgba(168,66,46,.09);
+  --v-success:#2F6D4F; --v-success-soft:rgba(47,109,79,.09);
+}
+html[data-theme="dark"]{
+  --v-bg:#211F1D; --v-bg2:#2A2825; --v-bg3:#343029;
+  --v-ink:#F7F3EA; --v-ink2:#DED7CB; --v-ink3:#B5ADA1;
+  --v-ink4:#9A9187;   /* 同样提亮，保持与亮色同一档可读性（5.30:1） */
+  --v-line:#453F37; --v-line2:#5A5248;
+  --v-accent:#E08A72; --v-accent-2:#D2775E; --v-accent-soft:rgba(224,138,114,.13);
+  --v-card:#2A2825;
+  --v-shadow:0 2px 3px rgba(0,0,0,.18), 0 12px 32px rgba(0,0,0,.24);
+  --v-shadow-lg:0 4px 8px rgba(0,0,0,.22), 0 20px 56px rgba(0,0,0,.3);
+  --v-on-accent:#211F1D;  /* 暗色 accent 是浅色，前景翻成深墨，6.30:1 */
+  /* 暗色下故意不跟 --v-accent 撞色——danger 保留偏红的色相（不是
+     accent 那种暖珊瑚），两者在暗色卡片上并排出现时还分得清是"强调"
+     还是"警告"。 */
+  --v-danger:#E2705C; --v-danger-soft:rgba(226,112,92,.14);
+  --v-success:#6FBF95; --v-success-soft:rgba(111,191,149,.14);
+}
+
+/* 中文不斜体:即使沿用旧标记,也强制回正 */
+:lang(zh) em, :lang(zh) i { font-style: normal; }

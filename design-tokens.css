@@ -1,0 +1,29 @@
+/* ============================================================
+   兼容别名层：--qiu-* 派生自 styles.css 的 --*（单一真源）
+   带 hex 兜底 → 即使某页只加载本文件、未加载 styles.css 也安全；
+   暗色模式下 --qiu-* 自动跟随 styles.css 的 --* 切换。
+   规范源 = styles.css 的 --*；本文件仅为历史 --qiu-* 用法保驾。
+   ============================================================ */
+:root {
+    --qiu-bg:            var(--bg, #FAF8F4);
+    --qiu-bg-soft:       var(--bg-2, #F2EEE5);
+    --qiu-ink:           var(--ink, #3A3936);
+    --qiu-ink-muted:     var(--ink-3, #77716A);
+    --qiu-line:          var(--line, rgba(207, 201, 190, 0.76));
+    --qiu-accent:        var(--accent, #A65D4E);
+    --qiu-danger:        var(--danger, #A8422E);
+    --qiu-danger-soft:   var(--danger-soft, rgba(168, 66, 46, 0.09));
+    --qiu-success:       var(--success, #2F6D4F);
+    --qiu-success-soft:  var(--success-soft, rgba(47, 109, 79, 0.09));
+    --qiu-glass:         var(--glass, rgba(255, 255, 255, 0.52));
+    --qiu-glass-strong:  var(--glass-strong, rgba(255, 255, 255, 0.76));
+    --qiu-radius-xs:     var(--radius-xs, 10px);
+    --qiu-radius-sm:     var(--radius-sm, 16px);
+    --qiu-radius-md:     var(--radius-md, 24px);
+    --qiu-radius-pill:   var(--radius-pill, 999px);
+    --qiu-shadow-soft:   var(--shadow-soft, 0 24px 72px rgba(68, 61, 54, 0.08));
+    --qiu-font-cn:       var(--font-cn, 'Noto Sans SC', 'PingFang SC', sans-serif);
+    --qiu-font-cn-serif: var(--font-cn-serif, 'Noto Serif SC', 'Songti SC', serif);
+    --qiu-font-serif:    var(--font-serif, 'Source Serif 4', Georgia, serif);
+    --qiu-font-mono:     var(--font-mono, 'JetBrains Mono', 'SF Mono', Menlo, monospace);
+}
