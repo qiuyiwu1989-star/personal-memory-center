@@ -60,6 +60,10 @@ def review(store, principal, record_id, body):
         if not row: raise Invalid('记录不存在')
         permit(principal, row['scope'], 'write')
         if row['lifecycle'] != 'active': raise Conflict('记录已被取代')
+        if state == 'verified':
+            from .entities import exists
+            if not exists(db,row['owner'],row['scope'],values['holder']) or not exists(db,row['owner'],row['scope'],values['subject_id']):
+                raise Invalid('核实前需登记主张者和对象的稳定实体 ID')
         old = metadata(row, db.execute('SELECT * FROM record_governance WHERE record_id=?', (record_id,)).fetchone())
         if body.get('revision') != old['revision']: raise Conflict('治理记录已变化，请刷新')
         new = old | values | dict(state=state, priority=priority, revision=old['revision']+1,
@@ -88,6 +92,8 @@ def context(store, principal, scope, query, max_chars=1600):
     result = {'records': [], 'total': len(rows), 'truncated': bool(rows), 'policy': 'verified-or-owner-corrected-v1'}
     for row in rows:
         item = {k:row[k] for k in ('id','statement','source_id','message_id','revision','governance')}
+        if row.get('translated'):
+            item['original_statement']=item['statement'];item['statement']=row['display_statement'];item['language']='zh'
         candidate = dict(result, records=result['records']+[item], truncated=len(result['records'])+1 < len(rows))
         if len(encoded(candidate)) <= max_chars: result['records'].append(item)
     result['truncated'] = len(result['records']) < len(rows)

@@ -29,6 +29,9 @@ class MemoryTest(unittest.TestCase):
         self.owner = {'id': 'owner', 'owner': 'q', 'scopes': ['personal', 'project:demo'],
                       'actions': ['read', 'write'], 'trusted_user': True}
         self.agent = dict(self.owner, id='agent', scopes=['project:demo'], trusted_user=False)
+        from pipeline.memory_center.budget import configure
+        for scope in self.owner['scopes']:
+            configure(self.store, self.owner, scope, {'token_limit':100000})
         self.model = FakeModel()
         self.grants = [dict(self.owner, token_sha256=hashlib.sha256(b'owner-secret').hexdigest()),
                        dict(self.agent, token_sha256=hashlib.sha256(b'agent-secret').hexdigest())]

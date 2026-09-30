@@ -70,6 +70,14 @@ class Store:
 
         from .governance import setup
         setup(self)
+        from .budget import setup as setup_budget
+        setup_budget(self)
+        from .bulk import setup as setup_bulk
+        setup_bulk(self)
+        from .reprocessing import setup as setup_runs
+        setup_runs(self)
+        from .entities import setup as setup_entities
+        setup_entities(self)
 
     @contextmanager
     def db(self):
@@ -153,6 +161,18 @@ class Store:
                              "(state='processing' AND lease_until<?) ORDER BY created LIMIT 1", (time.time(),)).fetchone()
             if not job:
                 return False
+            source = dict(db.execute('SELECT * FROM sources WHERE id=?', (job['source_id'],)).fetchone())
+            external = db.execute('SELECT s.reserved_attempts,s.reserved_tokens FROM bulk_segments s JOIN bulk_batches b ON b.id=s.batch_id WHERE s.job_id=? AND b.owner=? AND b.scope=?', (job['id'],source['owner'],source['scope'])).fetchone()
+            from .budget import reserve, settle
+            attempt = None
+            if external:
+                if external['reserved_attempts'] <= job['attempts'] or external['reserved_tokens'] <= 0:
+                    return False
+            else:
+                attempt = reserve(db, source, 'extract', job['id'])
+                if not attempt:
+                    db.execute("UPDATE jobs SET state='paused_budget',error='模型预算未设置或已用尽' WHERE id=?", (job['id'],))
+                    return True
             lease = uid()
             db.execute("UPDATE jobs SET state='processing',attempts=attempts+1,lease=?,lease_until=? WHERE id=?",
                        (lease, time.time() + 180, job['id']))
@@ -213,9 +233,13 @@ class Store:
             with self.db() as db:
                 db.execute("UPDATE jobs SET state='failed',error=?,usage=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=?",
                            (error[:160], encoded(usage), job['id'], lease))
+        finally:
+            with self.db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                settle(db, attempt, usage)
         return True
 
-    def snapshot(self, principal, scope, query='', history=False, limit=100):
+    def snapshot(self, principal, scope, query='', history=False, limit=100, governance_filter=None):
         permit(principal, scope, 'read')
         if not isinstance(query, str) or len(query) > 500:
             raise Invalid('查询上限 500 字符')
@@ -226,11 +250,16 @@ class Store:
                     + ('' if history else "AND r.lifecycle='active' ") + 'ORDER BY r.created DESC', (principal['owner'], scope))]
             jobs = [dict(r) for r in db.execute('SELECT j.*,s.payload source_payload,s.source_key FROM jobs j JOIN sources s ON s.id=j.source_id '
                     'WHERE s.owner=? AND s.scope=? ORDER BY j.created DESC LIMIT 40', (principal['owner'], scope))]
-        from .governance import metadata
+        from .governance import metadata, usable
         with self.db() as db:
             governed = {r['record_id']: dict(r) for r in db.execute('SELECT g.* FROM record_governance g JOIN records r ON r.id=g.record_id WHERE r.owner=? AND r.scope=?', (principal['owner'], scope))}
+        with self.db() as db:
+            translations = {r['record_id']:r['text'] for r in db.execute("SELECT t.record_id,t.text FROM record_translations t JOIN records r ON r.id=t.record_id WHERE r.owner=? AND r.scope=? AND t.language='zh'", (principal['owner'],scope))}
         for row in rows:
+            row['display_statement'] = translations.get(row['id'],row['statement'])
+            row['translated'] = row['id'] in translations
             row['governance'] = metadata(row, governed.get(row['id']))
+            row['usable'] = usable(row)
             messages = json.loads(row.pop('source_payload'))
             evidence = next((m for m in messages if m['id'] == row['message_id']), {})
             row['source_title'] = evidence.get('source_title', row['source_key'])
@@ -241,9 +270,13 @@ class Store:
         if query.strip():
             terms = set(re.findall(r'[a-z0-9_]+|[\u4e00-\u9fff]', query.lower()))
             def score(row):
-                text = ' '.join(row[k] for k in ('statement', 'subject', 'topic')).lower()
+                text = ' '.join(row[k] for k in ('statement', 'display_statement', 'subject', 'topic')).lower()
                 return sum(t in text for t in terms) + 5 * (query.lower() in text)
             rows = sorted((r for r in rows if score(r)), key=score, reverse=True)
+        if governance_filter:
+            if governance_filter not in ('candidate','verified','owner_corrected','historical','rejected','usable','history'):
+                raise Invalid('治理筛选无效')
+            rows=[r for r in rows if (r['usable'] if governance_filter=='usable' else (r['governance']['state']=='historical' or r['lifecycle']!='active') if governance_filter=='history' else r['governance']['state']==governance_filter)]
         status_counts={}
         for row in rows:status_counts[row['status']]=status_counts.get(row['status'],0)+1
         for job in jobs:
@@ -293,6 +326,10 @@ class Store:
             raise Invalid('资料不存在')
         permit(principal,row['scope'],'read')
         result=dict(row);result.pop('owner',None);result.pop('principal',None);result['messages']=json.loads(result.pop('payload'))
+        with self.db() as db:
+            envelope=db.execute('SELECT * FROM source_envelopes WHERE source_id=?',(source_id,)).fetchone()
+        result['source_metadata']=json.loads(envelope['metadata']) if envelope else {}
+        result['processing_policy']=envelope['policy'] if envelope else 'legacy'
         return result
 
     def correct(self, principal, rid, body):
@@ -359,6 +396,9 @@ def validate_plan(plan, source):
         message = messages.get(c['message_id'])
         if not message or c['quote'] not in message['text']:
             raise Invalid('证据必须逐字匹配来源消息')
+        acknowledgement=message['text'].strip().casefold().strip('。.!！')
+        if acknowledgement in ('继续','好的','好','是的','yes','ok','continue') and c['statement'].strip().casefold().strip('。.!！')!=acknowledgement:
+            raise Invalid('简短确认消息不能独立支持扩展记忆，请引用完整依据')
         # Role/status never comes from model output. Summary labels do not establish direct testimony.
         status = 'source_reported'
         if source['source_type'] == 'imported_summary':

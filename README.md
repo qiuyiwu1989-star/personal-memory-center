@@ -22,15 +22,15 @@ Source-backed, attributable, time-aware, correctable context for humans and agen
 
 ## 当前能力与缺口
 
-当前是从既有工作台抽离的 **0.1 首版**，没有携带原仓库历史或运行数据。
+当前是从既有工作台抽离的 **0.2 治理版**，没有携带原仓库历史或运行数据。
 
 | 已实现 | 仍需实现与评测 |
 |---|---|
-| SQLite 本地库、PostgreSQL 适配器、来源与幂等队列 | 完整实体登记、语义核实与生产回填 |
+| SQLite 本地库、PostgreSQL 适配器、来源与幂等队列 | 旧数据语义核实与保守回填 |
 | 模型适配、逐字引文校验、角色状态区分 | 语义支持检查、长期价值评测与冲突治理 |
-| 明确纠正、旧版留存、独立治理状态与重跑差异预览 | 完整重跑应用及按治理状态生成小主题 MD |
-| 6 个限范围 Bearer MCP 工具、REST、治理审核、短上下文与 MD 分页 | 统一模型预算、完整重跑应用与精确 token 预算 |
-| Claude 归档/分段/预算队列、只读结构审计 | 多 Agent 纠正一致性与完整模型成本评测 |
+| 明确纠正、旧版留存、独立治理状态与重跑差异预览 | 真实任务的文档与内容质量评测 |
+| 7 个限范围 Bearer MCP 工具、REST、治理审核、短上下文与 MD 分页 | 精确阅读 token 预算与更大语料的检索评测 |
+| Claude 归档/分段/预算队列、只读结构审计 | 完整真实语料的模型成本与质量评测 |
 
 `active` 表示旧实现中可检索，**不等于当前有效或语义已核实**。搜索可能返回候选；主题正文现在按字符预算分页。集成时须保留状态、日期和来源，客户端显式设置短搜索预算，不默认读取全部主题。
 
@@ -54,6 +54,8 @@ python3 -m venv .venv
 - `QIU_MEMORY_LLM_KEY`：私有模型密钥。
 - `QIU_MEMORY_LLM_MODEL`：模型标识。
 
+普通提炼、再次提炼和翻译共用范围预算，默认 0；后台设置样本预算，超过 10 万 tokens 需本人记录质量验收依据。旧 Claude 批次继续使用独立批次账本，不因代码升级恢复。
+
 也可使用私有目录的 `model.json`，权限必须为 0600。未配置模型时仍可保存资料，提炼任务显示失败；配置并重启后手动重试。默认无自动失败重试，防止无上限消耗。
 
 ## MCP 与 Skill
@@ -71,9 +73,10 @@ QIU_MEMORY_ORIGIN=http://127.0.0.1:5078 \
 |---|---|
 | `memory_context` | 仅已核实/本人纠正的短上下文，默认 1600 字符，不调用模型 |
 | `memory_search` | 包含治理状态的候选检索；不当作当前事实 |
-| `memory_document_get` | 主题目录或正文；当前正文无分页，谨慎显式调用 |
-| `memory_source_get` | 单消息原文；需额外 `source_read` |
+| `memory_document_get` | 主题目录或正文；分类目录、小文档和有预算的分页 |
+| `memory_source_get` | 单消息原文分页；需额外 `source_read` |
 | `memory_import` | 小批资料默认仅归档；显式 extract 才入模型队列 |
+| `memory_reextract` | 按已有预算重提炼；只产生差异待审核，不覆盖旧记录 |
 | `memory_import_status` | 任务状态；入队不等于处理完成 |
 
 客户端工作流见 [Skill](skills/personal-memory-center/SKILL.md)。尚无 OAuth 自动发现，亦不自动同步 ChatGPT 内置记忆。

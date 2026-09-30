@@ -79,6 +79,71 @@ def blueprint(store, grants, model, browser_principal=None):
     def ingest():
         return jsonify(store.ingest(g.memory_principal, body())), 202
 
+    @bp.get('/entities')
+    def entity_list():
+        from .entities import listing
+        return jsonify(listing(store,g.memory_principal,request.args.get('scope','personal')))
+
+    @bp.post('/entities')
+    def entity_register():
+        from .entities import register
+        data=body()
+        return jsonify(register(store,g.memory_principal,data.get('scope','personal'),data))
+
+    @bp.post('/records/<record_id>/translate')
+    def translate_record(record_id):
+        from .reprocessing import enqueue
+        with store.db() as db:
+            row=db.execute('SELECT source_id FROM records WHERE id=? AND owner=?',(record_id,g.memory_principal['owner'])).fetchone()
+        if not row:raise Invalid('记录不存在')
+        return jsonify(enqueue(store,g.memory_principal,row['source_id'],body().get('request_key'),'translate',record_id)),202
+
+    @bp.get('/overview')
+    def overview():
+        from .governance import usable
+        p=g.memory_principal;scope=request.args.get('scope','personal');permit(p,scope,'read')
+        snapshot=store.snapshot(p,scope,history=True,limit=1000000)
+        active=[r for r in snapshot['records'] if r['lifecycle']=='active']
+        with store.db() as db:
+            sources=db.execute("SELECT count(*) n FROM sources WHERE owner=? AND scope=? AND source_type!='correction'",(p['owner'],scope)).fetchone()['n']
+            tasks={r['state']:r['n'] for r in db.execute('SELECT j.state,count(*) n FROM jobs j JOIN sources s ON s.id=j.source_id WHERE s.owner=? AND s.scope=? GROUP BY j.state',(p['owner'],scope))}
+        return jsonify(sources=sources,records=len(active),usable=sum(usable(r) for r in active),
+                       candidates=sum(r['governance']['state']=='candidate' for r in active),
+                       historical=sum(r['governance']['state']=='historical' or r['lifecycle']!='active' for r in snapshot['records']),
+                       rejected=sum(r['governance']['state']=='rejected' for r in active),jobs=tasks)
+
+    @bp.get('/budget')
+    def budget_status():
+        from .budget import status
+        return jsonify(status(store,g.memory_principal,request.args.get('scope','personal')))
+
+    @bp.post('/budget')
+    def budget_configure():
+        from .budget import configure
+        data=body()
+        return jsonify(configure(store,g.memory_principal,data.get('scope','personal'),data))
+
+    @bp.post('/materials/<source_id>/reextract')
+    def enqueue_reextract(source_id):
+        from .reprocessing import enqueue
+        return jsonify(enqueue(store,g.memory_principal,source_id,body().get('request_key'))),202
+
+    @bp.get('/extraction-runs')
+    def extraction_runs():
+        from .reprocessing import listing
+        return jsonify(listing(store,g.memory_principal,request.args.get('scope','personal')))
+
+    @bp.get('/extraction-previews/<preview_id>')
+    def extraction_preview_get(preview_id):
+        from .reprocessing import get_preview
+        return jsonify(get_preview(store,g.memory_principal,preview_id))
+
+    @bp.post('/extraction-runs/<run_id>/control')
+    def extraction_control(run_id):
+        from .reprocessing import control
+        data=body()
+        return jsonify(control(store,g.memory_principal,run_id,data.get('action'),data.get('indices')))
+
     @bp.get('/materials')
     def materials():
         try:offset=int(request.args.get('offset','0'))
@@ -98,7 +163,7 @@ def blueprint(store, grants, model, browser_principal=None):
     @bp.get('/records')
     def records():
         return jsonify(store.snapshot(g.memory_principal, request.args.get('scope', 'personal'),
-                        request.args.get('q', ''), request.args.get('history') == '1'))
+                        request.args.get('q', ''), request.args.get('history') == '1', governance_filter=request.args.get('state') or None))
 
     @bp.post('/records/<record_id>/governance')
     def govern(record_id):
@@ -230,7 +295,9 @@ def start_worker(store, model):
                     logging.getLogger(__name__).warning('Memory batch scheduler: %s', kind)
                     last_scheduler_error = kind
             try:
+                from .reprocessing import process_one as process_run
                 busy = store.process_one(model)
+                if not busy: busy = process_run(store, model)
             except Exception:
                 busy = False
             stop.wait(0.2 if busy else 2)

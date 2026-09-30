@@ -85,10 +85,17 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
                     from .reading import page
                     return page(doc, offset, max_chars)
             raise ValueError('Topic not found')
-        return {'documents':[{k:d[k] for k in ('slug','title','revision','claims')} for d in docs]}
+        from .core import encoded
+        items=[]
+        for d in docs[offset:]:
+            item={k:d[k] for k in ('slug','title','revision','claims','is_index','category')}
+            candidate={'documents':items+[item],'next_offset':offset+len(items)+1,'total':len(docs)}
+            if len(encoded(candidate))>max_chars:break
+            items.append(item)
+        return {'documents':items,'next_offset':offset+len(items) if offset+len(items)<len(docs) else None,'total':len(docs)}
 
     @mcp.tool()
-    def memory_source_get(source_id:str,message_id:str,ctx:Context)->dict:
+    def memory_source_get(source_id:str,message_id:str,ctx:Context,offset:int=0,max_chars:int=4000)->dict:
         """Read one source message. Requires separate source_read action."""
         p=principal(ctx)
         with store.db() as db:
@@ -96,7 +103,9 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
         if not row:raise ValueError('Source not found')
         permit(p,row['scope'],'source_read')
         for message in json.loads(row['payload']):
-            if message['id']==message_id:return {'source_key':row['source_key'],'message':message}
+            if message['id']==message_id:
+                from .reading import source_page
+                return source_page(row['source_key'],message,offset,max_chars)
         raise ValueError('Message not found')
 
     @mcp.tool()
@@ -105,11 +114,20 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
         return store.ingest(principal(ctx),{'scope':scope,'source_key':source_key,'messages':messages,'source_type':source_type,'processing_policy':processing_policy,'source_metadata':source_metadata or {}})
 
     @mcp.tool()
+    def memory_reextract(source_id:str,request_key:str,ctx:Context)->dict:
+        """Queue a budgeted source re-extraction; produces a comparison, never overwrites old memories. Requires scoped read/write."""
+        from .reprocessing import enqueue
+        return enqueue(store,principal(ctx),source_id,request_key)
+
+    @mcp.tool()
     def memory_import_status(job_id:str,ctx:Context)->dict:
         """Read a single authorized import job state; never returns source payload."""
         p=principal(ctx)
         with store.db() as db:
             row=db.execute('SELECT j.id,j.state,j.attempts,j.error,j.usage,s.scope FROM jobs j JOIN sources s ON s.id=j.source_id WHERE j.id=? AND s.owner=?',(job_id,p['owner'])).fetchone()
+        if not row:
+            with store.db() as db:
+                row=db.execute('SELECT id,state,attempts,error,usage,scope FROM extraction_runs WHERE id=? AND owner=?',(job_id,p['owner'])).fetchone()
         if not row:raise ValueError('Job not found')
         permit(p,row['scope'],'read');return dict(row)
 

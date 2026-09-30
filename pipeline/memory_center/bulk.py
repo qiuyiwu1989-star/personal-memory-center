@@ -2,11 +2,12 @@
 import hashlib
 import json
 import re
+import os
 import time
 from pathlib import Path
 from .core import Invalid, encoded, permit
 
-SCOPE = 'claude:history'
+SCOPE = os.environ.get('QIU_MEMORY_HISTORY_SCOPE','claude:history')
 RESERVE_TOKENS = 35000  # 24k source chars + 4k output tokens + prompt, rounded upward.
 TOPICS = ('profile', 'preferences', 'people', 'areas', 'projects', 'topics')
 
@@ -199,7 +200,10 @@ class Bulk:
         return [self.status(principal,id) for id in ids]
 
     def control(self,principal,batch_id,action,token_limit=None):
-        permit(principal,SCOPE,'write')
+        with self.store.db() as db:
+            scoped=db.execute('SELECT scope FROM bulk_batches WHERE id=? AND owner=?',(batch_id,principal['owner'])).fetchone()
+        if not scoped:raise Invalid('未找到导入批次')
+        permit(principal,scoped['scope'],'write')
         if not principal.get('trusted_user'):
             raise PermissionError('仅本人可控制批次')
         if action not in ('pause','resume','retry_failed','set_limit'):
@@ -213,6 +217,9 @@ class Bulk:
                 if not row:raise Invalid('未找到导入批次')
                 if token_limit<=row['token_limit'] or token_limit<row['tokens_spent']+RESERVE_TOKENS:
                     raise Invalid('新上限需高于现有上限，并留出下一次请求的预算')
+                quality=db.execute('SELECT quality_approved,note FROM model_budgets WHERE owner=? AND scope=?',(principal['owner'],scoped['scope'])).fetchone()
+                if not quality or not quality['quality_approved'] or not quality['note'].strip():
+                    raise Invalid('扩大历史批次前需本人记录质量验收依据')
                 if row['state'] not in ('paused_budget','paused'):
                     raise Invalid('仅暂停的批次可调整上限')
                 db.execute("UPDATE bulk_batches SET token_limit=?,state='running' WHERE id=?",(token_limit,batch_id))

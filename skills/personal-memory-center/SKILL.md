@@ -15,10 +15,11 @@ claim that a proposed interface exists.
 2. If personal background is necessary, call `memory_context` with a specific query,
    authorized scope and explicit `max_chars=1600`.
 3. Expand only when the task needs more: targeted search, then 1–2 matching source
-   messages with `memory_source_get`. Use `memory_search` to investigate candidates,
+   messages with paged `memory_source_get` (offset/max_chars). Use `memory_search` to investigate candidates,
    preserving their governance state; it is not a verified context feed. Deep review may require more evidence.
 4. `memory_document_get` with empty topic_id lists metadata. A specified topic currently
-   returns a bounded page; pass offset/ max_chars and expand only when necessary.
+   returns a bounded page; pass offset/max_chars and expand only when necessary.
+   Directory results are also paged. Expand a small leaf document rather than the whole category.
 
 Keep historical statements, assistant advice, external views, imported summaries and
 owner corrections distinct. A quote match does not prove a model's interpretation,
@@ -42,3 +43,17 @@ not one enormous tool call. Do not raise an existing token limit without authori
 Read-only agents cannot import or correct. Send inferred updates as candidate sources;
 do not impersonate the owner's correction permissions. Method upgrades must preserve
 prior versions and compare results before replacement.
+
+
+## Re-extract and language
+
+`memory_reextract` queues an existing source with a stable request_key and the current
+method version. It spends the same scoped model budget as ordinary extraction and
+translation; no budget means paused_budget, never a free bypass. Poll its id through
+memory_import_status at a meaningful boundary. Results await owner comparison; agents
+cannot replace old records or upgrade candidates to verified.
+
+New candidate statements use Chinese; original-language evidence remains unchanged.
+Adopted Chinese translations are display projections, not new confirmation or evidence.
+Missing model usage retains a conservative allowance. Do not retry unknown failures
+or mark quality_approved on the owner's behalf.

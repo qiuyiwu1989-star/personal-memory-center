@@ -20,6 +20,8 @@ class DocumentTest(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.store=Store(self.tmp.name)
         self.principal={'id':'owner','owner':'owner','scopes':['project:demo'],'actions':['read','write'],'trusted_user':True}
+        from pipeline.memory_center.budget import configure
+        configure(self.store,self.principal,'project:demo',{'token_limit':100000})
         self.model=Extractor()
         self.body={'scope':'project:demo','source_key':'conversation:demo','messages':[{'id':'1','role':'user','text':'先逐条确认，再存记忆。','source_title':'Memory discussion','created_at':'2026-09-10'}]}
         define_topic(self.store,self.principal,'project:demo','memory','记忆中心',['conversation:demo'])

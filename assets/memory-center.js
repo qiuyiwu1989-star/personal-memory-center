@@ -3,8 +3,9 @@
   const $ = id => document.getElementById(id);
   const prefix = '/api/inside/memory-center/v1';
   let token = '', identity = null, timer = null, refreshing = false, pendingJobs = false;
+  let documentData=[], documentCategory='', documentLeaf=false;
   let fileName='', fileRead=0, activeBatch=null, materialOffset=0;
-  const labels = {user_stated:'本人陈述 · 模型提炼', source_reported:'来源陈述', imported_summary:'导入摘要',agent_suggested:'AI 发言 · 未经本人确认',active:'可检索',superseded:'已被纠正',received:'待整理',processing:'正在提炼',applied:'已应用',failed:'失败',profile:'个人',preferences:'偏好',people:'人物',areas:'领域',projects:'项目',topics:'主题'};
+  const labels = {archived:'已归档',paused_budget:'等待预算',ready:'待审核',discarded:'未采用',user_stated:'本人陈述 · 模型提炼', source_reported:'来源陈述', imported_summary:'导入摘要',agent_suggested:'AI 发言 · 未经本人确认',active:'可检索',superseded:'已被纠正',received:'待整理',processing:'正在提炼',applied:'提炼完成',failed:'失败',profile:'个人',preferences:'偏好',people:'人物',areas:'领域',projects:'项目',topics:'主题'};
   function notice(message, error=false) { $('notice').hidden=!message; $('notice').textContent=message; $('notice').dataset.error=String(error); }
   async function api(path, body) {
     const response = await fetch(prefix+path,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:'Bearer '+token}:{'X-Memory-Local':'1'}),'Content-Type':'application/json'},cache:'no-store',body:body===undefined?undefined:JSON.stringify(body)});
@@ -35,7 +36,8 @@
     if(batch.state==='paused_error')$('bulk-errors').textContent='连接模型失败后已暂停，避免继续空转消耗预算。请检查模型服务，再点击重试。'+($('bulk-errors').textContent?' '+$('bulk-errors').textContent:'');
     if(batch.state==='paused_budget' && identity?.can_correct){
       const amount=node('input');amount.type='number';amount.min=String(batch.token_limit+35000);amount.max='100000000';amount.step='1000';amount.value=String(Math.min(100000000,batch.token_limit+1000000));amount.setAttribute('aria-label','新的累计 token 上限');
-      const button=node('button','提高上限并继续','primary');button.addEventListener('click',async()=>{button.disabled=true;try{await api('/bulk/'+batch.id+'/control',{action:'set_limit',token_limit:Number(amount.value)});await refreshArchives();}catch(err){notice(err.message,true);button.disabled=false;}});actions.append(amount,button);
+      const quality=node('input');quality.type='checkbox';quality.style.width='auto';const qualityLabel=node('label',undefined,'row');qualityLabel.append(quality,node('span','质量已核对，允许扩大预算'));const note=node('input');note.placeholder='质量验收依据';note.maxLength=1000;note.setAttribute('aria-label','历史批次质量验收依据');
+      const button=node('button','提高上限并继续','primary');button.addEventListener('click',async()=>{if(!quality.checked||!note.value.trim()){notice('先记录质量验收依据；引用匹配本身不足以验收。',true);return;}button.disabled=true;try{const old=await api('/budget?'+new URLSearchParams({scope:batch.scope}));await api('/budget',{scope:batch.scope,token_limit:old.token_limit,quality_approved:true,note:note.value});await api('/bulk/'+batch.id+'/control',{action:'set_limit',token_limit:Number(amount.value)});await refreshArchives();}catch(err){notice(err.message,true);button.disabled=false;}});actions.append(amount,qualityLabel,note,button);
     }
   }
   async function refreshMaterials(reset=false){
@@ -57,6 +59,7 @@
       const buttons=node('div',undefined,'tile-actions'),read=node('button','查看原文');
       read.addEventListener('click',async()=>{read.disabled=true;try{const raw=await api('/materials/'+item.id);openDocument(item.title||'原始资料',raw.messages.map(m=>'['+m.role+'] '+m.text).join('\n\n'));}catch(err){notice(err.message,true);}finally{read.disabled=false;}});buttons.append(read);
       if(item.state==='failed' && item.job_id){const retry=node('button','重试整理','primary');retry.addEventListener('click',async()=>{retry.disabled=true;try{await api('/jobs/'+item.job_id+'/retry',{});await refreshMaterials(true);}catch(err){notice(err.message,true);retry.disabled=false;}});buttons.append(retry);}
+      if(identity.can_correct){const reextract=node('button','再次整理');let requestKey;reextract.addEventListener('click',async()=>{reextract.disabled=true;requestKey ||= crypto.randomUUID();try{await api('/materials/'+item.id+'/reextract',{request_key:requestKey});location.hash='jobs';showView();await refreshRuns();notice('已入队；按现有预算提炼，结果先供比较。');}catch(err){notice(err.message,true);reextract.disabled=false;}});buttons.append(reextract);}
       card.append(buttons);$('materials-list').append(card);
     }
     materialOffset+=data.materials.length;$('materials-more').hidden=materialOffset>=data.total;
@@ -79,14 +82,20 @@
     const scope=$('scope').value, activeToken=token;
     const data=await api('/documents?'+new URLSearchParams({scope,q:$('document-query').value}));
     if(!identity || token!==activeToken || scope!==$('scope').value) return;
+    documentData=data.documents;renderDocumentCategories();
+    renderDocuments();
+  }
+  function renderDocuments(){
+    const documents=documentData.filter(d=>(!documentCategory||d.category===documentCategory) && (documentLeaf?!d.is_index:!d.slug.includes('--page-')));
+    $('document-location').textContent=documentLeaf?'展开：'+(labels[documentCategory]||documentCategory)+' · 每页最多 25 组陈述':'主题目录 · 选择分类查看小文档';
     $('documents').replaceChildren();
-    if(!data.documents.length) $('documents').append(node('p','此范围尚无匹配的主题文档。','muted'));
-    for(const doc of data.documents) {
+    if(!documents.length) $('documents').append(node('p','此范围尚无匹配的主题文档。','muted'));
+    for(const doc of documents) {
       const block=node('article',undefined,'record topic-tile');
-      block.append(node('h3',doc.title),node('p','v'+doc.revision+' · '+doc.claims+' 项陈述','muted'));
+      block.dataset.category=doc.category;block.append(node('span',labels[doc.category]||'主题','topic-category'),node('h3',doc.title),node('p',(doc.is_index?'分类目录 · ':'')+'v'+doc.revision+' · '+doc.claims+' 项陈述','muted'));
       const excerpt=doc.markdown.split('\n').find(line=>line.startsWith('- ')&&!line.startsWith('- 标题'));
       block.append(node('p',excerpt?excerpt.slice(2):'打开查看陈述、变化与原文依据。','tile-excerpt'));
-      const read=node('button','阅读文档','primary');read.addEventListener('click',()=>openDocument(doc.title,doc.markdown));
+      const read=node('button',doc.is_index?'展开小文档':'阅读文档','primary');read.addEventListener('click',()=>{if(doc.is_index){documentCategory=doc.category;documentLeaf=true;renderDocumentCategories();renderDocuments();}else openDocument(doc.title,doc.markdown,true);});
       const changes=node('button','版本变化');changes.addEventListener('click',()=>openDocument(doc.title+' · v'+doc.revision,doc.changes||'无变化'));
       const download=node('button','下载 MD');download.addEventListener('click',()=>{
         const url=URL.createObjectURL(new Blob([doc.markdown],{type:'text/markdown;charset=utf-8'}));
@@ -100,26 +109,30 @@
     refreshing=true;
     const requestedToken=token, requestedScope=$('scope').value;
     try {
-      const params=new URLSearchParams({scope:$('scope').value,q:$('query').value,history:$('history').checked?'1':'0'});
+      const params=new URLSearchParams({scope:$('scope').value,q:$('query').value,history:$('history').checked?'1':'0',state:$('record-governance').value});
       const data=await api('/records?'+params);
       if(token!==requestedToken || !identity || $('scope').value!==requestedScope) return;
       await refreshDocuments();
       if(token!==requestedToken || !identity || $('scope').value!==requestedScope) return;
+      await refreshOverview();await refreshBudget();await refreshRuns();
       pendingJobs=data.jobs.some(j=>j.state==='received'||j.state==='processing');
       $('count').textContent=String(data.total);
       const breakdown=data.status_counts||{};
-      $('record-breakdown').textContent='当前范围：'+$('scope').selectedOptions[0].textContent+' · 原话提炼 '+(breakdown.source_reported||0)+' · AI 发言 '+(breakdown.agent_suggested||0)+' · 旧摘要 '+(breakdown.imported_summary||0)+' · 本人确认 '+(breakdown.user_stated||0)+'。抽取记录不等于已确认的长期记忆。';
+      $('record-breakdown').textContent='当前范围：'+$('scope').selectedOptions[0].textContent+' · 原话提炼 '+(breakdown.source_reported||0)+' · AI 发言 '+(breakdown.agent_suggested||0)+' · 旧摘要 '+(breakdown.imported_summary||0)+' · 本人来源 '+(breakdown.user_stated||0)+'。抽取记录不等于已确认的长期记忆。';
       $('records').replaceChildren(); $('jobs').replaceChildren();
       if(!data.records.length) $('records').append(node('p','还没有匹配的记忆。提交材料后，管家会在这里留下理解与依据。','empty'));
       if(data.truncated) $('records').append(node('p','当前展示前 100 条，请缩小搜索范围。','muted'));
       for(const r of data.records) {
-        const card=node('article',undefined,'record memory-tile');card.dataset.topic=r.topic;card.dataset.status=r.status;card.dataset.lifecycle=r.lifecycle;
+        const card=node('article',undefined,'record memory-tile');card.dataset.topic=r.topic;card.dataset.status=r.status;card.dataset.lifecycle=r.lifecycle;card.dataset.governance=r.governance?.state||'candidate';card.dataset.usable=String(r.usable);
         [labels[r.topic]||r.topic,r.message_id==='correction'?'本人明确纠正':(labels[r.status]||r.status),labels[r.lifecycle]||r.lifecycle,'v'+r.revision,...(r.source_date?[r.source_date.slice(0,10)]:[]),...(r.processing_method==='session_agent'?['会话 Agent 整理']:r.processing_method==='llm'?['后台模型提炼']:[])].forEach(t=>card.append(node('span',t,'tag')));
-        card.append(node('p',({user:'本人',assistant:'AI 助手'}[r.subject]||r.subject),'muted'),node('p',r.statement,'statement'));
+        card.append(node('p',({user:'本人',assistant:'AI 助手'}[r.subject]||r.subject),'muted'),node('p',r.display_statement||r.statement,'statement'));
+        if(r.translated)card.append(node('span','中文译文 · 原文保留','tag'));
         if(r.governance){const g=r.governance;const states={candidate:'待核实候选',verified:'已核实',historical:'历史判断',rejected:'不采纳',owner_corrected:'本人纠正'};card.append(node('p',(states[g.state]||g.state)+' · '+g.priority+' · 成立时间：'+(g.as_of||'未知'),'muted'));}
         if(r.review_note) card.append(node('p','与旧记忆对照：'+r.review_note,'muted'));
-        const details=node('details'); details.append(node('summary','查看原文证据与来源'),node('blockquote',r.quote),node('p','来源：'+(r.source_title||r.source_id)+' · '+(r.source_date||'时间未记录')+' / '+(r.source_key||r.source_id)+' / 消息 '+r.message_id,'muted'));card.append(details);
+        const details=node('details'); if(r.translated)details.append(node('p','原始陈述：'+r.statement,'muted'));details.append(node('summary','查看原文证据与来源'),node('blockquote',r.quote),node('p','来源：'+(r.source_title||r.source_id)+' · '+(r.source_date||'时间未记录')+' / '+(r.source_key||r.source_id)+' / 消息 '+r.message_id,'muted'));card.append(details);
         if(identity.can_correct && identity.actions.includes('write') && r.lifecycle==='active') {
+          const govern=node('button','核实 / 标记');govern.addEventListener('click',()=>reviewRecord(r).catch(err=>notice(err.message,true)));card.append(govern);
+          if(!r.translated && /[a-zA-Z]{4}/.test(r.statement)){const translate=node('button','生成中文译文');let requestKey;translate.addEventListener('click',async()=>{translate.disabled=true;requestKey ||= crypto.randomUUID();try{await api('/records/'+r.id+'/translate',{request_key:requestKey});notice('已进入翻译队列，原文与治理状态保持。');await refreshRuns();}catch(err){notice(err.message,true);translate.disabled=false;}});card.append(translate);}
           const button=node('button','纠正这条理解'); button.style.marginTop='12px';
           button.addEventListener('click',()=>{
             button.hidden=true;
@@ -137,7 +150,7 @@
       for(const j of data.jobs) {
         const row=node('article',undefined,'job');row.dataset.state=j.state;row.append(node('h3',j.source_title||'整理任务'));row.append(node('span',labels[j.state]||j.state,'tag'),node('span',j.id.slice(0,8)+' · 尝试 '+j.attempts+' 次'));
         const steps=node('ol',undefined,'job-steps');
-        ['received','processing','applied'].forEach((step,i)=>{const item=node('li',labels[step]);const stage=['received','processing','applied'].indexOf(j.state);item.dataset.done=String(i<=stage);steps.append(item);});
+        (j.state==='archived'?['archived']:['received','processing','applied']).forEach((step,i)=>{const item=node('li',labels[step]);const stage=j.state==='archived'?0:['received','processing','applied'].indexOf(j.state);item.dataset.done=String(i<=stage);steps.append(item);});
         row.append(steps);
         if(j.state==='failed')row.append(node('p','处理未完成，查看错误后可重试。','muted'));
         if(j.usage?.method==='session_agent') row.append(node('p','由本次会话 Agent 阅读原文整理；未调用后台模型，未单独计量 token。','muted'));
@@ -186,14 +199,14 @@
       const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(b=>b.toString(16).padStart(2,'0')).join('');
       let duplicates=0;
       for(let i=0;i<parts.length;i++){
-        const result=await api('/sources',{scope,source_type:type,source_key:'workbench:text:'+digest+(parts.length>1?':part:'+String(i+1):''),messages:[{id:'1',role:type==='conversation'?'user':'external',text:parts[i],source_title:(name||'工作台提交')+(parts.length>1?' · 第 '+(i+1)+'/'+parts.length+' 段':'')}]});
+        const result=await api('/sources',{scope,source_type:type,processing_policy:$('processing-policy').value,source_metadata:{parser_version:'utf8-text-v1',parent_source_key:'workbench:file:'+digest,locator:'part:'+String(i+1)},source_key:'workbench:text:'+digest+(parts.length>1?':part:'+String(i+1):''),messages:[{id:'1',role:type==='conversation'?'user':'external',text:parts[i],source_title:(name||'工作台提交')+(parts.length>1?' · 第 '+(i+1)+'/'+parts.length+' 段':'')}]});
         accepted++;if(result.duplicate)duplicates++;
         $('file-state').textContent='已提交 '+accepted+'/'+parts.length+' 段；原文没有截断。';
       }
       if($('material').value===text){$('material').value='';fileName='';$('file-input').value='';$('file-state').textContent='资料已提交，可以继续添加。';}
-      notice(duplicates===parts.length?'这份资料已提交，未重复创建任务。':'已自动分成 '+parts.length+' 段入队，管家将逐段整理。');
+      notice(duplicates===parts.length?'这份资料已提交，未重复创建任务。':'已自动分成 '+parts.length+' 段'+($('processing-policy').value==='archive'?'归档，未调用模型。':'入队，管家将按预算逐段整理。'));
       $('scope').value=scope;updateSpaceLabel();
-      location.hash='jobs';await refresh();
+      location.hash='jobs';showView();await refresh();
       await refreshMaterials(true);
     }catch(err){notice((accepted?'已提交 '+accepted+' 段；':'')+err.message+'。保留正文，再次提交会跳过已完成入队的分段。',true);}finally{button.disabled=false;$('material').readOnly=false;}
   });
@@ -218,13 +231,84 @@
   ['dragleave','drop'].forEach(name=>drop.addEventListener(name,e=>{e.preventDefault();drop.classList.remove('dragging');}));
   drop.addEventListener('drop',e=>loadFile(e.dataTransfer.files));
   function applyFilters(){
-    let visible=0;document.querySelectorAll('.memory-tile').forEach(card=>{card.hidden=!!(($('record-kind').value&&card.dataset.topic!==$('record-kind').value)||($('record-status').value&&card.dataset.status!==$('record-status').value));if(!card.hidden)visible++;});
+    let visible=0;document.querySelectorAll('.memory-tile').forEach(card=>{card.hidden=!!(($('record-kind').value&&card.dataset.topic!==$('record-kind').value)||($('record-status').value&&card.dataset.status!==$('record-status').value)||($('record-governance').value&&($('record-governance').value==='usable'?card.dataset.usable!=='true':$('record-governance').value==='history'?card.dataset.governance!=='historical'&&card.dataset.lifecycle==='active':card.dataset.governance!==$('record-governance').value)));if(!card.hidden)visible++;});
     $('filter-count').textContent='当前列表显示 '+visible+' 条；分类与性质筛选作用于已加载记录，更多内容请使用搜索。';
   }
+  $('record-governance').addEventListener('change',()=>{if($('record-governance').value==='history')$('history').checked=true;refresh();});
   ['record-kind','record-status'].forEach(id=>$(id).addEventListener('change',applyFilters));
+  function renderDocumentCategories(){
+    const host=$('document-categories');host.replaceChildren();
+    const categories=[...new Set(documentData.map(d=>d.category))];
+    for(const category of ['',...categories]){
+      const button=node('button',category?(labels[category]||'主题'):'全部分类');
+      button.setAttribute('aria-pressed',String(category===documentCategory));
+      button.addEventListener('click',()=>{documentCategory=category;documentLeaf=!!category;renderDocumentCategories();renderDocuments();});host.append(button);
+    }
+    if(documentLeaf){const back=node('button','返回目录');back.addEventListener('click',()=>{documentLeaf=false;documentCategory='';renderDocumentCategories();renderDocuments();});host.append(back);}
+  }
+  async function refreshOverview(){
+    const scope=$('scope').value,data=await api('/overview?'+new URLSearchParams({scope}));
+    if(scope!==$('scope').value)return;
+    $('memory-overview').replaceChildren();
+    const stages=[['sources','原始资料','保留原文','ingest'],['candidates','待核实','抽取不等于事实','records'],['usable','可用记忆','按任务提供给 Agent','records'],['historical','历史变化','更正与旧判断可回查','records']];
+    for(const [key,title,help,view] of stages){
+      const box=node('button',undefined,'stage-card');box.dataset.stage=key;box.append(node('span',title),node('strong',String(data[key])),node('span',help));
+      box.addEventListener('click',()=>{location.hash=view;showView();if(view==='records'){$('record-governance').value=key==='candidates'?'candidate':key==='usable'?'usable':'history';if(key==='historical')$('history').checked=true;refresh();}});$('memory-overview').append(box);
+    }
+  }
+  async function refreshBudget(){
+    const scope=$('scope').value,b=await api('/budget?'+new URLSearchParams({scope}));if(scope!==$('scope').value)return;
+    $('budget-summary').textContent=b.tokens_spent.toLocaleString('zh-CN')+' / '+b.token_limit.toLocaleString('zh-CN')+' tokens · '+(b.quality_approved?'本人已记录质量验收':'样本阶段，尚未放开')+' · '+b.unresolved_attempts+' 次用量未返回 / 已预留';
+    $('budget-progress').max=Math.max(1,b.token_limit);$('budget-progress').value=b.tokens_spent;
+    $('budget-settings').hidden=!identity.can_correct;
+    if(!$('budget-form').contains(document.activeElement)){$('budget-limit').value=b.token_limit;$('budget-quality').checked=!!b.quality_approved;$('budget-note').value=b.note;}
+  }
+  $('budget-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{await api('/budget',{scope:$('scope').value,token_limit:Number($('budget-limit').value),quality_approved:$('budget-quality').checked,note:$('budget-note').value});notice('预算已保存；普通提炼和再次整理共用计量。Claude 历史批次需在原始资料中另行控制。');await refresh();}catch(err){notice(err.message,true);}finally{button.disabled=false;}});
+  async function refreshRuns(){
+    const scope=$('scope').value,data=await api('/extraction-runs?'+new URLSearchParams({scope}));if(scope!==$('scope').value)return;
+    $('extraction-runs').replaceChildren();
+    if(!data.runs.length)$('extraction-runs').append(node('p','尚无再次整理或翻译任务。','empty'));
+    for(const run of data.runs){
+      const card=node('article',undefined,'run-card');card.append(node('h3',run.operation==='translate'?'中文译文':'再次提炼'),node('span',labels[run.state]||run.state,'tag'),node('p',run.source_key,'muted'),node('p',run.method_version+' · '+run.attempts+' 次尝试','muted'));
+      if(run.error)card.append(node('p',run.error,'muted'));
+      if(run.usage)card.append(node('p','返回用量 '+(run.usage.total_tokens??'未知')+' tokens','muted'));
+      if(run.state==='ready'){const button=node('button','查看差异','primary');button.addEventListener('click',()=>reviewRun(run).catch(err=>notice(err.message,true)));card.append(button);}
+      if(run.state==='failed' && identity.can_correct){const retry=node('button','重试');retry.addEventListener('click',async()=>{retry.disabled=true;try{await api('/extraction-runs/'+run.id+'/control',{action:'retry'});await refreshRuns();}catch(err){notice(err.message,true);retry.disabled=false;}});card.append(retry);}
+      $('extraction-runs').append(card);
+    }
+  }
+  async function reviewRun(run){
+    const data=await api('/extraction-previews/'+run.preview_id),host=$('review-content');host.replaceChildren();$('review-title').textContent=run.operation==='translate'?'核对中文译文':'比较再次提炼结果';
+    host.append(node('p','采用候选不会覆盖旧结论或自动核实；译文仅改变展示。','muted'));
+    const form=node('form');const checks=[];
+    data.changes.forEach((change,i)=>{const item=node('div',undefined,'diff-item'),label=node('label',undefined,'row'),check=node('input');check.type='checkbox';check.value=String(i);check.disabled=change.comparison==='duplicate';checks.push(check);label.append(check,node('span',({duplicate:'重复 · 无需再加入',new:'新增候选',related_needs_review:'有关联旧记录 · 需对照',translation:'中文展示译文'})[change.comparison]||change.comparison));item.append(label);
+      if(change.candidate.original)item.append(node('p','原文：'+change.candidate.original));
+      for(const old of change.existing||[])item.append(node('p','旧记录：'+old.statement,'muted'));
+      item.append(node('p',change.candidate.text||change.candidate.statement,'statement'));
+      if(change.candidate.quote)item.append(node('blockquote',change.candidate.quote));form.append(item);
+    });
+    if(!data.changes.length)form.append(node('p','本次没有提出可保存的候选。','muted'));
+    const accept=node('button',run.operation==='translate'?'采用中文译文':'采用选中的候选','primary'),discard=node('button','本次不采用');discard.type='button';form.append(accept,discard);host.append(form);
+    async function submit(action,indices){accept.disabled=true;discard.disabled=true;try{await api('/extraction-runs/'+run.id+'/control',{action,indices});$('review-dialog').close();await refresh();}catch(err){notice(err.message,true);accept.disabled=false;discard.disabled=false;}}
+    form.addEventListener('submit',e=>{e.preventDefault();const indices=checks.filter(c=>c.checked).map(c=>Number(c.value));if(!indices.length){notice('先选择要采用的候选。',true);return;}submit('apply',indices);});discard.addEventListener('click',()=>submit('discard'));$('review-dialog').showModal();
+  }
+  async function reviewRecord(record){
+    const data=await api('/entities?'+new URLSearchParams({scope:$('scope').value}));const host=$('review-content');host.replaceChildren();$('review-title').textContent='核实归属与有效时间';
+    host.append(node('p',record.display_statement||record.statement,'statement'),node('blockquote',record.quote),node('p','日期不明就保留候选；来源时间不自动当作成立时间。','muted'));
+    const form=node('form'),grid=node('div',undefined,'review-grid'),fields={};
+    function field(key,title,type,choices){const box=node('div'),label=node('label',title);const input=node(choices?'select':'input');input.setAttribute('aria-label',title);if(!choices)input.type=type||'text';if(choices)for(const [value,text] of choices){const o=node('option',text);o.value=value;input.append(o);}input.value=record.governance?.[key]||'';fields[key]=input;box.append(label,input);grid.append(box);}
+    field('state','治理状态',null,[['candidate','待核实'],['verified','已核实'],['historical','历史判断'],['rejected','不采纳']]);
+    field('priority','保存优先级',null,[['P0','P0 · 身份与重要更正'],['P1','P1 · 关系与关键决策'],['P2','P2 · 持续偏好'],['P3','P3 · 档案与讨论']]);
+    const entities=[['','未知'],...data.entities.map(e=>[e.id,e.name+' · '+e.id])];field('holder','谁认为',null,entities);field('subject_id','关于谁 / 什么',null,entities);field('as_of','何时成立','date');field('valid_until','何时失效（可空）','date');field('note','审核依据','text');
+    const save=node('button','保存审核状态','primary');form.append(grid,save);host.append(form);
+    const registry=node('details');registry.append(node('summary','登记人物或项目（不自动合并同名人物）'));const entityForm=node('form'),eid=node('input'),name=node('input'),kind=node('select');eid.placeholder='稳定 ID，如 person:sample';eid.required=true;name.placeholder='名称';name.required=true;for(const [value,title] of [['person','人物'],['project','项目'],['organization','组织'],['topic','主题']]){const o=node('option',title);o.value=value;kind.append(o);}const add=node('button','登记实体');entityForm.append(eid,name,kind,add);registry.append(entityForm);host.append(registry);entityForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/entities',{scope:$('scope').value,id:eid.value,kind:kind.value,name:name.value,aliases:[]});$('review-dialog').close();await reviewRecord(record);}catch(err){notice(err.message,true);}});
+    form.addEventListener('submit',async e=>{e.preventDefault();save.disabled=true;const body={revision:record.governance.revision};for(const [key,input] of Object.entries(fields))body[key]=input.value||null;try{await api('/records/'+record.id+'/governance',body);$('review-dialog').close();notice('审核状态已保存，来源和旧版本保留。');await refresh();}catch(err){notice(err.message,true);save.disabled=false;}});$('review-dialog').showModal();
+  }
+  $('review-close').addEventListener('click',()=>$('review-dialog').close());
+
   function updateSpaceLabel(){ $('space-label').textContent='正在查看：'+$('scope').selectedOptions[0].textContent; }
-  $('scope').addEventListener('change',()=>{updateSpaceLabel();$('document-reader').close();});
-  function openDocument(title,text){$('reader-title').textContent=title;$('reader-body').textContent=text;$('document-reader').showModal();}
+  $('scope').addEventListener('change',()=>{documentCategory='';documentLeaf=false;updateSpaceLabel();$('document-reader').close();});
+  function openDocument(title,text,markdown=false){$('reader-title').textContent=title;const host=$('reader-body');host.replaceChildren();if(!markdown){host.append(node('pre',text));}else{let front=false;for(const line of text.split('\n')){if(line==='---'){front=!front;continue;}if(front)continue;const heading=line.match(/^(#{1,3}) (.*)$/);if(heading)host.append(node('h'+heading[1].length,heading[2]));else if(line.startsWith('> '))host.append(node('blockquote',line.slice(2)));else if(line.startsWith('- '))host.append(node('p','• '+line.slice(2)));else if(line.trim())host.append(node('p',line));}}$('document-reader').showModal();}
   $('reader-close').addEventListener('click',()=>$('document-reader').close());
   $('search-form').addEventListener('submit',e=>{e.preventDefault();refresh();});['scope','history'].forEach(id=>$(id).addEventListener('change',refresh));$('refresh').addEventListener('click',refresh);
   $('document-search-form').addEventListener('submit',async e=>{e.preventDefault();try{await refreshDocuments();}catch(err){notice(err.message,true);}});

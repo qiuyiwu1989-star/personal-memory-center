@@ -56,8 +56,9 @@ def render(topic, rows):
         seen=set()
         while row.get('supersedes') and row['supersedes'] in by_id and row['id'] not in seen:
             seen.add(row['id']); row=by_id[row['supersedes']]
-        if topic['slug'].startswith('history-') and topic['scope']=='claude:history':
-            if row['topic']!=topic['slug'][len('history-'):]:
+        if topic['slug'].startswith('history-') and topic['scope'].startswith('claude:history'):
+            category=topic.get('category') or topic['slug'][len('history-'):].split('--page-')[0]
+            if row['topic']!=category:
                 return False
         return any(row['source_key'].startswith(p) for p in prefixes)
     records=sorted((r for r in rows if belongs(r)),key=lambda r:(r['created'],r['id']))
@@ -66,18 +67,25 @@ def render(topic, rows):
         if r['lifecycle']!='active':
             continue
         # Only identical normalized assertions with same attribution merge; no semantic guessing.
-        key=(r['status'],r['kind'],normalize(r['subject']),normalize(r['statement']))
+        key=(r['status'],r['kind'],normalize(r['subject']),normalize(r['statement']),r.get('governance',{}).get('state','candidate'))
         groups.setdefault(key,[]).append(r)
     refs={r['id']:'S'+str(i+1) for i,r in enumerate(records)}
-    sections={'本人明确纠正':[], '历史陈述与要求':[], 'AI 发言与建议（未经本人确认）':[], '导入摘要（尚未回查原话）':[]}
+    sections={'已核实的有效记忆':[], '待核实候选':[], '历史判断':[], '不采纳（保留溯源）':[], '本人明确纠正':[], '历史陈述与要求':[], 'AI 发言与建议（未经本人确认）':[], '导入摘要（尚未回查原话）':[]}
     for group in groups.values():
         r=group[-1]
         section=('本人明确纠正' if r['message_id']=='correction' else 'AI 发言与建议（未经本人确认）'
                  if r['status']=='agent_suggested' else '导入摘要（尚未回查原话）'
                  if r['status']=='imported_summary' else '历史陈述与要求')
+        governance=r.get('governance',{})
+        if governance.get('state')=='verified':
+            from .governance import usable
+            section='已核实的有效记忆' if usable(r) else '历史判断'
+        elif governance.get('state')=='historical':section='历史判断'
+        elif governance.get('state')=='rejected':section='不采纳（保留溯源）'
+        elif section=='历史陈述与要求':section='待核实候选'
         date=(r.get('source_date') or '')[:10] or '原始日期未记录'
         refs_text=' '.join('['+refs[x['id']]+']' for x in group)
-        sections[section].append('- '+literal(r['statement'])+'（'+date+'） '+refs_text)
+        sections[section].append('- '+literal(r.get('display_statement',r['statement']))+'（'+date+'） '+refs_text)
     lines=['---','id: '+topic['slug'],'title: '+json.dumps(topic['title'],ensure_ascii=False),
            'scope: '+json.dumps(topic['scope'],ensure_ascii=False),'format: memory-topic-v1','---','',
            '# '+literal(topic['title']),'',
@@ -107,8 +115,15 @@ def render(topic, rows):
                   '- 消息：'+literal(r['message_id']),
                   '- 记录：'+r['id']+' / v'+str(r['revision'])+' / '+r['lifecycle'],
                   '- 性质：'+r['status'],
+                  '- 治理状态：'+r.get('governance',{}).get('state','candidate'),
+                  '- 主张者：'+literal(r.get('governance',{}).get('holder') or '未知'),
+                  '- 对象：'+literal(r.get('governance',{}).get('subject_id') or r['subject']),
+                  '- 优先级：'+r.get('governance',{}).get('priority','P3'),
+                  '- 失效日期：'+str(r.get('governance',{}).get('valid_until') or '未记录'),
+                  '- 成立时间：'+str(r.get('governance',{}).get('as_of') or '未知'),
+                  '- 原始陈述：'+literal(r['statement']) if r.get('translated') else '- 展示语言：原文',
                   '> '+literal(r['quote']),'']
-    dependencies=[{'id':r['id'],'revision':r['revision'],'lifecycle':r['lifecycle']} for r in records]
+    dependencies=[{'id':r['id'],'revision':r['revision'],'lifecycle':r['lifecycle'],'governance_revision':r.get('governance',{}).get('revision',0)} for r in records]
     return '\n'.join(lines), dependencies, len(groups)
 
 
@@ -124,9 +139,47 @@ def build_documents(store, principal, scope, query=''):
         db.execute('BEGIN IMMEDIATE')
         topics=db.execute('SELECT * FROM document_topics WHERE owner=? AND scope=? ORDER BY slug',
                           (principal['owner'],scope)).fetchall()
+        signature=encoded({
+            'topics':[dict(t) for t in topics],
+            'records':dict(db.execute('SELECT count(*) n,max(created) latest,sum(revision) revisions FROM records WHERE owner=? AND scope=?',(principal['owner'],scope)).fetchone()),
+            'governance':dict(db.execute('SELECT count(*) n,max(g.reviewed) latest,sum(g.revision) revisions FROM record_governance g JOIN records r ON r.id=g.record_id WHERE r.owner=? AND r.scope=?',(principal['owner'],scope)).fetchone()),
+            'translations':dict(db.execute('SELECT count(*) n,max(t.reviewed) latest FROM record_translations t JOIN records r ON r.id=t.record_id WHERE r.owner=? AND r.scope=?',(principal['owner'],scope)).fetchone())})
+        cache=getattr(store,'_document_cache',{}).get((principal['owner'],scope))
+        if cache and cache[0]==signature:
+            intact=all(Path(d['export_path']).exists() and Path(d['export_path']).stat().st_mtime_ns==stamp for d,stamp in cache[1])
+            if intact:
+                return [dict(d) for d,_ in cache[1] if not query.strip() or query.casefold() in (d['title']+'\n'+d['markdown']).casefold()]
         rows=store.snapshot(principal,scope,history=True,limit=1000000)['records']
-        for topic in topics:
-            markdown,deps,count=render(dict(topic),rows)
+        expanded=[]
+        for raw_topic in topics:
+            topic=dict(raw_topic)
+            markdown,deps,count=render(topic,rows)
+            if count<=25:
+                expanded.append((topic,rows,None));continue
+            member_ids={d['id'] for d in deps}
+            members=[r for r in rows if r['id'] in member_ids]
+            by_id={r['id']:r for r in members}
+            def root(row):
+                seen=set()
+                while row.get('supersedes') in by_id and row['id'] not in seen:
+                    seen.add(row['id']);row=by_id[row['supersedes']]
+                return row
+            groups={}
+            for row in sorted(members,key=lambda r:(root(r)['created'],root(r)['id'],r['created'],r['id'])):
+                original=root(row)
+                key=(original['status'],original['kind'],normalize(original['subject']),normalize(original['statement']))
+                groups.setdefault(key,[]).append(row)
+            batches=list(groups.values());pages=[]
+            for start in range(0,len(batches),25):
+                index=start//25+1
+                leaf=dict(topic,slug=topic['slug']+'--page-'+str(index),title=topic['title']+' · '+str(index))
+                if topic['slug'].startswith('history-'):leaf['category']=topic['slug'][8:]
+                page_rows=[r for group in batches[start:start+25] for r in group]
+                expanded.append((leaf,page_rows,None));pages.append(leaf)
+            directory='# '+literal(topic['title'])+'\n\n分类目录；具体陈述分成小文档，每页最多 25 组，审核状态在正文标明。\n\n'+ '\n'.join('- '+literal(p['title'])+' · '+p['slug'] for p in pages)
+            expanded.append((topic,members,(directory,deps,count)))
+        for topic,page_rows,index_projection in expanded:
+            markdown,deps,count=index_projection or render(topic,page_rows)
             digest=hashlib.sha256(markdown.encode()).hexdigest()
             old=db.execute('SELECT * FROM document_versions WHERE owner=? AND scope=? AND slug=? ORDER BY revision DESC LIMIT 1',
                            (principal['owner'],scope,topic['slug'])).fetchone()
@@ -152,8 +205,8 @@ def build_documents(store, principal, scope, query=''):
                     os.replace(tmp,target)
                 finally:
                     if os.path.exists(tmp):os.unlink(tmp)
-            if query.strip() and query.casefold() not in (topic['title']+'\n'+markdown).casefold():
-                continue
             results.append({'slug':topic['slug'],'title':topic['title'],'revision':revision,'digest':digest,
-                            'markdown':markdown,'changes':diff,'claims':count,'dependencies':deps,'export_path':str(target)})
-    return results
+                            'markdown':markdown,'changes':diff,'claims':count,'dependencies':deps,'export_path':str(target),'is_index':bool(index_projection),'category':topic.get('category') or topic['slug'].replace('history-','').split('--page-')[0]})
+    if not hasattr(store,'_document_cache'):store._document_cache={}
+    store._document_cache[(principal['owner'],scope)]=(signature,[(d,Path(d['export_path']).stat().st_mtime_ns) for d in results])
+    return [d for d in results if not query.strip() or query.casefold() in (d['title']+'\n'+d['markdown']).casefold()]

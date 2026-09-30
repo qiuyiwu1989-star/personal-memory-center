@@ -161,6 +161,10 @@ class BulkTest(unittest.TestCase):
             self.bulk.control(self.owner,batch['id'],'set_limit',100000)
         with self.assertRaises(PermissionError):
             self.bulk.control(dict(self.owner,trusted_user=False),batch['id'],'set_limit',200000)
+        with self.assertRaisesRegex(ValueError,'质量验收'):
+            self.bulk.control(self.owner,batch['id'],'set_limit',200000)
+        from pipeline.memory_center.budget import configure
+        configure(self.store,self.owner,SCOPE,{'token_limit':0,'quality_approved':True,'note':'Synthetic explicit owner quality acceptance'})
         changed=self.bulk.control(self.owner,batch['id'],'set_limit',200000)
         self.assertEqual((changed['token_limit'],changed['state']),(200000,'running'))
     def test_pause_stops_new_jobs(self):
