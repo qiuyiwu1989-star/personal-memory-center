@@ -7,6 +7,6 @@ assert.throws(()=>decode('notes.pdf',b('text')),/暂时支持/);
 assert.throws(()=>decode('a.json',b('{')),/JSON/);
 assert.throws(()=>decode('a.txt',new Uint8Array([0xff])),/UTF-8/);
 assert.throws(()=>decode('a.txt',b(' ')),/为空/);
-assert.throws(()=>decode('a.txt',b('a'.repeat(20001))),/20,000/);
+assert.equal(decode('a.txt',b('a'.repeat(20001))).length,20001);
 assert.throws(()=>decode('a.txt',b('a\0b')),/二进制/);
 console.log('8 file validation checks passed');
