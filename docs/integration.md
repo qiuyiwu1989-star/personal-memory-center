@@ -28,3 +28,9 @@ Agent grants 保存 token 哈希，服务端决定 owner、scope 与 actions。�
 | 源码、测试、方法、虚构示例 | 公开 GitHub 仓库 |
 
 迁移、备份策略、TLS 反代和生产服务管理由部署方配置。本仓库没有自动修改现有网站或服务器的部署 workflow。
+
+## 固定 UI 发布版本
+
+模块 UI 可以通过 deploy/nginx/memory-ui.conf 的三个精确 location 指向独立的公共静态 release；该目录仅有 HTML/JS/CSS，不含配置、原件、数据库或文档。HTML 继续使用宿主 /_qy_auth 和 @qy_login，API 与 Agent Bearer 边界不变。宿主 ws-shell、登录和其他静态文件仍来自原站。
+
+这样主站的全树部署不会用旧副本覆盖本模块。只切换这三个文件和模块后端 release，不推原站的无关改动。安装前备份原记忆 snippet，执行 nginx -t；失败则恢复原配置，不能跳过校验。该片段适用于已有 qiuyiwu 工作台，其他宿主需要自己的登录守卫。
