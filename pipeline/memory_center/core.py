@@ -165,13 +165,16 @@ class Store:
             external = db.execute('SELECT s.reserved_attempts,s.reserved_tokens FROM bulk_segments s JOIN bulk_batches b ON b.id=s.batch_id WHERE s.job_id=? AND b.owner=? AND b.scope=?', (job['id'],source['owner'],source['scope'])).fetchone()
             from .budget import reserve, settle
             attempt = None
+            if source['principal']=='archive-batch' and not external:
+                db.execute("UPDATE jobs SET state='paused_budget',error='等待历史批次分配预留' WHERE id=?",(job['id'],))
+                return True
             if external:
                 if external['reserved_attempts'] <= job['attempts'] or external['reserved_tokens'] <= 0:
                     return False
             else:
                 attempt = reserve(db, source, 'extract', job['id'])
                 if not attempt:
-                    db.execute("UPDATE jobs SET state='paused_budget',error='模型预算未设置或已用尽' WHERE id=?", (job['id'],))
+                    db.execute("UPDATE jobs SET state='paused_budget',error='模型预算未设置或已用尽（含历史总上限）' WHERE id=?", (job['id'],))
                     return True
             lease = uid()
             db.execute("UPDATE jobs SET state='processing',attempts=attempts+1,lease=?,lease_until=? WHERE id=?",

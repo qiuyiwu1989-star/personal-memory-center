@@ -167,6 +167,35 @@ class BulkTest(unittest.TestCase):
         configure(self.store,self.owner,SCOPE,{'token_limit':0,'quality_approved':True,'note':'Synthetic explicit owner quality acceptance'})
         changed=self.bulk.control(self.owner,batch['id'],'set_limit',200000)
         self.assertEqual((changed['token_limit'],changed['state']),(200000,'running'))
+    def test_shared_budget_blocks_generic_reextraction_and_bulk_dispatch(self):
+        from pipeline.memory_center.budget import configure, status
+        from pipeline.memory_center.reprocessing import enqueue, process_one, listing
+        batch=self.bulk.create(self.owner,BATCH,100000)
+        configure(self.store,self.owner,SCOPE,{'token_limit':100000})
+        source=self.store.ingest(self.owner,{'scope':SCOPE,'source_key':'synthetic-reextract','processing_policy':'archive','messages':[{'id':'1','role':'user','text':'Synthetic evidence'}]})['id']
+        enqueue(self.store,self.owner,source,'synthetic-shared')
+        with self.store.db() as db:db.execute('UPDATE bulk_batches SET tokens_spent=100000 WHERE id=?',(batch['id'],))
+        model=MeteredModel();process_one(self.store,model)
+        self.assertEqual(model.calls,0)
+        self.assertEqual(listing(self.store,self.owner,SCOPE)['runs'][0]['state'],'paused_budget')
+        self.assertEqual(status(self.store,self.owner,SCOPE)['legacy_tokens_spent'],100000)
+        with self.store.db() as db:
+            db.execute('UPDATE bulk_batches SET tokens_spent=0 WHERE id=?',(batch['id'],))
+            db.execute('UPDATE model_budgets SET tokens_spent=90000 WHERE owner=? AND scope=?',('q',SCOPE))
+        self.bulk.tick()
+        self.assertEqual(self.bulk.status(self.owner,batch['id'])['state'],'paused_budget')
+        self.assertEqual(self.bulk.status(self.owner,batch['id'])['counts'].get('queued',0),0)
+
+    def test_unfunded_archive_job_cannot_run_as_generic_import(self):
+        principal=dict(self.owner,id='archive-batch')
+        result=self.store.ingest(principal,{'scope':SCOPE,'source_key':'synthetic-unfunded','messages':[{'id':'1','role':'user','text':'Synthetic evidence'}]})
+        from pipeline.memory_center.budget import configure
+        configure(self.store,self.owner,SCOPE,{'token_limit':100000})
+        model=MeteredModel();self.store.process_one(model)
+        self.assertEqual(model.calls,0)
+        with self.store.db() as db:
+            self.assertEqual(db.execute('SELECT state FROM jobs WHERE id=?',(result['job_id'],)).fetchone()['state'],'paused_budget')
+
     def test_pause_stops_new_jobs(self):
         batch=self.bulk.create(self.owner,BATCH)
         self.bulk.control(self.owner,batch['id'],'pause')

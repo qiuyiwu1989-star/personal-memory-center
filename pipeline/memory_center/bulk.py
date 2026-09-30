@@ -6,6 +6,7 @@ import os
 import time
 from pathlib import Path
 from .core import Invalid, encoded, permit
+from .budget import scoped_spent
 
 SCOPE = os.environ.get('QIU_MEMORY_HISTORY_SCOPE','claude:history')
 RESERVE_TOKENS = 35000  # 24k source chars + 4k output tokens + prompt, rounded upward.
@@ -226,17 +227,15 @@ class Bulk:
             return self.status(principal,batch_id)
         if action=='retry_failed':
             with self.store.db() as db:
-                batch=db.execute('SELECT state,tokens_spent,token_limit FROM bulk_batches WHERE id=? AND owner=?',(batch_id,principal['owner'])).fetchone()
-                candidate=db.execute("SELECT job_id FROM bulk_segments WHERE batch_id=? AND state='failed' ORDER BY created LIMIT 1",(batch_id,)).fetchone()
-            if not batch or not candidate:raise Invalid('没有可重试的失败任务')
-            if batch['tokens_spent']+RESERVE_TOKENS>batch['token_limit']:
-                raise Invalid('达到模型用量上限；不能重试')
-            self.store.retry(principal,candidate['job_id'])
-            with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
-                segment=db.execute('SELECT attempts_counted FROM bulk_segments WHERE job_id=?',(candidate['job_id'],)).fetchone()
+                batch=db.execute('SELECT state,tokens_spent,token_limit,scope FROM bulk_batches WHERE id=? AND owner=?',(batch_id,principal['owner'])).fetchone()
+                candidate=db.execute("SELECT s.job_id,s.attempts_counted FROM bulk_segments s JOIN jobs j ON j.id=s.job_id WHERE s.batch_id=? AND s.state='failed' AND j.state='failed' ORDER BY s.created LIMIT 1",(batch_id,)).fetchone()
+                if not batch or not candidate:raise Invalid('没有可重试的失败任务')
+                if batch['tokens_spent']+scoped_spent(db,principal['owner'],batch['scope'])+RESERVE_TOKENS>batch['token_limit']:
+                    raise Invalid('达到模型用量上限；不能重试')
+                db.execute("UPDATE jobs SET state='received',error=NULL WHERE id=?",(candidate['job_id'],))
                 db.execute("UPDATE bulk_segments SET state='queued',error=NULL,reserved_attempts=?,reserved_tokens=? WHERE job_id=?",
-                           (segment['attempts_counted']+1,RESERVE_TOKENS,candidate['job_id']))
+                           (candidate['attempts_counted']+1,RESERVE_TOKENS,candidate['job_id']))
                 db.execute("UPDATE bulk_batches SET state='running',tokens_spent=tokens_spent+? WHERE id=?",(RESERVE_TOKENS,batch_id))
             return self.status(principal,batch_id)
         with self.store.db() as db:
@@ -264,8 +263,8 @@ class Bulk:
                 if s['job_state']=='processing' and s['lease_until'] is not None and s['lease_until']<time.time() and s['attempts']>=s['reserved_attempts']:
                     with self.store.db() as db:
                         db.execute('BEGIN IMMEDIATE')
-                        current=db.execute('SELECT state,tokens_spent,token_limit FROM bulk_batches WHERE id=?',(b['id'],)).fetchone()
-                        if current['tokens_spent']+RESERVE_TOKENS>current['token_limit']:
+                        current=db.execute('SELECT state,tokens_spent,token_limit,owner,scope FROM bulk_batches WHERE id=?',(b['id'],)).fetchone()
+                        if current['tokens_spent']+scoped_spent(db,current['owner'],current['scope'])+RESERVE_TOKENS>current['token_limit']:
                             db.execute("UPDATE jobs SET state='failed',error='budget_reclaim',lease=NULL,lease_until=NULL WHERE id=? AND state='processing'",(s['job_id'],))
                             db.execute("UPDATE bulk_batches SET state='paused_budget' WHERE id=?",(b['id'],))
                         else:
@@ -296,7 +295,8 @@ class Bulk:
                         if unmetered and s['job_state']=='failed':
                             db.execute("UPDATE bulk_batches SET state='paused_error' WHERE id=? AND state='running'",(b['id'],))
             with self.store.db() as db:
-                row=db.execute('SELECT state,tokens_spent,token_limit FROM bulk_batches WHERE id=?',(b['id'],)).fetchone()
+                row=db.execute('SELECT state,tokens_spent,token_limit,owner,scope FROM bulk_batches WHERE id=?',(b['id'],)).fetchone()
+                extra=scoped_spent(db,row['owner'],row['scope'])
                 counts={r['state']:r['n'] for r in db.execute('SELECT state,count(*) AS n FROM bulk_segments WHERE batch_id=? GROUP BY state',(b['id'],))}
             if row['state']!='running':continue
             if counts.get('queued',0):continue
@@ -304,7 +304,7 @@ class Bulk:
                 with self.store.db() as db:db.execute('UPDATE bulk_batches SET state=? WHERE id=?',
                                                      ('completed_with_errors' if counts.get('failed',0) else 'completed',b['id']))
                 continue
-            if row['tokens_spent']+RESERVE_TOKENS>row['token_limit']:
+            if row['tokens_spent']+extra+RESERVE_TOKENS>row['token_limit']:
                 with self.store.db() as db:db.execute("UPDATE bulk_batches SET state='paused_budget' WHERE id=?",(b['id'],))
                 continue
             with self.store.db() as db:
@@ -313,6 +313,13 @@ class Bulk:
             result=self.store.ingest(principal,{'scope':b['scope'],'source_type':next_segment['source_type'],'source_key':next_segment['source_key'],'messages':json.loads(next_segment['payload'])})
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
+                current=db.execute('SELECT * FROM bulk_batches WHERE id=?',(b['id'],)).fetchone()
+                segment=db.execute('SELECT state FROM bulk_segments WHERE id=?',(next_segment['id'],)).fetchone()
+                if current['state']!='running' or segment['state']!='planned':continue
+                if current['tokens_spent']+scoped_spent(db,current['owner'],current['scope'])+RESERVE_TOKENS>current['token_limit']:
+                    db.execute("UPDATE bulk_batches SET state='paused_budget' WHERE id=?",(b['id'],));continue
+                db.execute("UPDATE jobs SET state='received',error=NULL WHERE id=? AND state='paused_budget'",(result['job_id'],))
                 db.execute('UPDATE bulk_segments SET state=?,job_id=?,reserved_attempts=1,reserved_tokens=? WHERE id=?',
                            ('queued',result['job_id'],RESERVE_TOKENS,next_segment['id']))
                 db.execute('UPDATE bulk_batches SET tokens_spent=tokens_spent+? WHERE id=?',(RESERVE_TOKENS,b['id']))
+

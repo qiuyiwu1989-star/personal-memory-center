@@ -46,7 +46,7 @@ def configure(store, principal, scope, body):
                    (uid(),principal['owner'],scope,principal['id'],encoded(body),time.time()))
         # Explicit budget action wakes paused generic imports and runs, never legacy bulk.
         db.execute("UPDATE jobs SET state='received',error=NULL WHERE state='paused_budget' AND source_id IN "
-                   '(SELECT id FROM sources WHERE owner=? AND scope=?)',(principal['owner'],scope))
+                   "(SELECT id FROM sources WHERE owner=? AND scope=? AND principal!='archive-batch')",(principal['owner'],scope))
         db.execute("UPDATE extraction_runs SET state='received',error=NULL WHERE owner=? AND scope=? AND state='paused_budget'", (principal['owner'],scope))
     return status(store,principal,scope)
 
@@ -56,8 +56,9 @@ def status(store,principal,scope):
     with store.db() as db:
         row=db.execute('SELECT * FROM model_budgets WHERE owner=? AND scope=?',(principal['owner'],scope)).fetchone()
         unknown=db.execute("SELECT count(*) n FROM model_attempts WHERE owner=? AND scope=? AND state IN ('reserved','usage_unknown')",(principal['owner'],scope)).fetchone()['n']
+        legacy=db.execute('SELECT sum(tokens_spent) spent,sum(token_limit) cap FROM bulk_batches WHERE owner=? AND scope=?',(principal['owner'],scope)).fetchone()
         totals=[dict(r) for r in db.execute('SELECT operation,sum(charged) tokens,count(*) attempts FROM model_attempts WHERE owner=? AND scope=? GROUP BY operation',(principal['owner'],scope))]
-    return (dict(row) if row else {'scope':scope,'token_limit':0,'tokens_spent':0,'quality_approved':False,'note':''}) | {'unresolved_attempts':unknown,'operations':totals}
+    return (dict(row) if row else {'scope':scope,'token_limit':0,'tokens_spent':0,'quality_approved':False,'note':''}) | {'unresolved_attempts':unknown,'operations':totals,'legacy_tokens_spent':legacy['spent'] or 0,'shared_token_limit':legacy['cap']}
 
 
 def reserve(db,source,operation,reference_id):
@@ -65,6 +66,8 @@ def reserve(db,source,operation,reference_id):
     allowance=len(source['payload'].encode('utf-8'))+12000
     row=db.execute('SELECT * FROM model_budgets WHERE owner=? AND scope=?',(source['owner'],source['scope'])).fetchone()
     if not row or row['tokens_spent']+allowance>row['token_limit']:return None
+    legacy=db.execute('SELECT sum(tokens_spent) spent,sum(token_limit) cap FROM bulk_batches WHERE owner=? AND scope=?',(source['owner'],source['scope'])).fetchone()
+    if legacy['cap'] is not None and legacy['spent']+row['tokens_spent']+allowance>legacy['cap']:return None
     aid=uid()
     db.execute('UPDATE model_budgets SET tokens_spent=tokens_spent+? WHERE owner=? AND scope=?',(allowance,source['owner'],source['scope']))
     db.execute('INSERT INTO model_attempts VALUES(?,?,?,?,?,?,?,?,?,?)',
@@ -86,3 +89,8 @@ def settle(db,attempt_id,usage):
         return
     db.execute("UPDATE model_attempts SET charged=?,state='settled',usage=? WHERE id=?",(amount,encoded(usage),attempt_id))
     db.execute('UPDATE model_budgets SET tokens_spent=tokens_spent+? WHERE owner=? AND scope=?',(amount-row['reservation'],row['owner'],row['scope']))
+
+
+def scoped_spent(db,owner,scope):
+    row=db.execute('SELECT tokens_spent FROM model_budgets WHERE owner=? AND scope=?',(owner,scope)).fetchone()
+    return row['tokens_spent'] if row else 0

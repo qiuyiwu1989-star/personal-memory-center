@@ -259,6 +259,7 @@
   async function refreshBudget(){
     const scope=$('scope').value,b=await api('/budget?'+new URLSearchParams({scope}));if(scope!==$('scope').value)return;
     $('budget-summary').textContent=b.tokens_spent.toLocaleString('zh-CN')+' / '+b.token_limit.toLocaleString('zh-CN')+' tokens · '+(b.quality_approved?'本人已记录质量验收':'样本阶段，尚未放开')+' · '+b.unresolved_attempts+' 次用量未返回 / 已预留';
+    if(b.shared_token_limit!=null)$('budget-summary').textContent+=' · 含历史批次合计 '+(b.tokens_spent+b.legacy_tokens_spent).toLocaleString('zh-CN')+' / '+b.shared_token_limit.toLocaleString('zh-CN')+' tokens';
     $('budget-progress').max=Math.max(1,b.token_limit);$('budget-progress').value=b.tokens_spent;
     $('budget-settings').hidden=!identity.can_correct;
     if(!$('budget-form').contains(document.activeElement)){$('budget-limit').value=b.token_limit;$('budget-quality').checked=!!b.quality_approved;$('budget-note').value=b.note;}
