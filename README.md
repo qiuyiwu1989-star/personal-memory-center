@@ -18,6 +18,8 @@ Source-backed, attributable, time-aware, correctable context for humans and agen
 
 方法与实施边界见 [治理设计](docs/governance.md)、[旧数据处理](docs/legacy-data.md) 和 [接入与部署](docs/integration.md)。
 
+多源接入、质量关卡与分阶段交付见 [工作计划](docs/implementation-plan-2026-10-01.md) 和 [离线交互流程图](docs/diagrams/2026-10-01-多源记忆接入与工作计划.html)。
+
 ## 当前能力与缺口
 
 当前是从既有工作台抽离的 **0.1 首版**，没有携带原仓库历史或运行数据。
