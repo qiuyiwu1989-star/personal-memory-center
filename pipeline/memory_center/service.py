@@ -57,16 +57,16 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
         return p
 
     @mcp.tool()
-    def memory_search(query:str, ctx:Context, scope:str='personal', max_chars:int=6000)->dict:
-        """Search scoped active memories, bounded by max_chars (500–16000)."""
+    def memory_search(query:str, ctx:Context, scope:str='personal', max_chars:int=6000, retrieval_mode:str='lexical-v1')->dict:
+        """Search bounded candidates. Default lexical-v1 retained; lexical-v2 is experimental strict matching with measured recall loss. No auto fallback or factual approval."""
         from .reading import search_page
-        return search_page(store.snapshot(principal(ctx),scope,query),max_chars)
+        return search_page(store.snapshot(principal(ctx),scope,query,retrieval_mode=retrieval_mode),max_chars)
 
     @mcp.tool()
-    def memory_context(query:str, ctx:Context, scope:str='personal', max_chars:int=1600)->dict:
-        """Load bounded verified or owner-corrected task context; no model calls."""
+    def memory_context(query:str, ctx:Context, scope:str='personal', max_chars:int=1600, retrieval_mode:str='lexical-v1')->dict:
+        """Load bounded verified or owner-corrected context; no model calls or candidate fallback. Default lexical-v1, optional experimental lexical-v2 may miss relevant material."""
         from .governance import context
-        return context(store, principal(ctx), scope, query, max_chars)
+        return context(store, principal(ctx), scope, query, max_chars, retrieval_mode)
 
     @mcp.tool()
     def memory_document_get(ctx:Context, scope:str='personal', topic_id:str='', offset:int=0, max_chars:int=4000)->dict:

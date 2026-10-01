@@ -57,12 +57,12 @@ def seed_candidates(store, cases, runs):
     return principal, count
 
 
-def run_benchmark(store, principal, scope, tasks=TASKS, max_chars=1600):
+def run_benchmark(store, principal, scope, tasks=TASKS, max_chars=1600,retrieval_mode='lexical-v1'):
     results = []
     for task_id, query in tasks:
         start = time.perf_counter()
-        hits = store.snapshot(principal,scope,query,limit=5)['records']
-        current = context(store,principal,scope,query,max_chars=max_chars)
+        hits = store.snapshot(principal,scope,query,limit=5,retrieval_mode=retrieval_mode)['records']
+        current = context(store,principal,scope,query,max_chars=max_chars,retrieval_mode=retrieval_mode)
         elapsed = (time.perf_counter()-start)*1000
         source_count = sum(bool(r['source_id'] and r['message_id'] and r['quote']) for r in hits)
         chars = len(encoded(current))
@@ -76,7 +76,8 @@ def run_benchmark(store, principal, scope, tasks=TASKS, max_chars=1600):
                         'context_chars':chars,'within_char_budget':chars<=max_chars,
                         'approx_tokens_utf8_bytes_div4':(len(encoded(current).encode())+3)//4,
                         'elapsed_ms':round(elapsed,2),'semantic_relevance':'not_annotated'})
-    return {'method':'lexical-v1-isolated-replay','tasks':results,'task_count':len(results),
+    from pipeline.memory_center.retrieval_ranking import RETRIEVAL_VERSION
+    return {'method':retrieval_mode+'-isolated-replay','tasks':results,'task_count':len(results),
             'model_calls':0,'actual_model_tokens':0,'char_budget':max_chars,
             'token_estimate_note':'UTF-8 bytes / 4 diagnostic only; not model tokenizer or billed usage.',
             'quality_gate_passed':False,
@@ -85,6 +86,7 @@ def run_benchmark(store, principal, scope, tasks=TASKS, max_chars=1600):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--retrieval-mode',choices=['lexical-v1','lexical-v2'],default='lexical-v1')
     parser.add_argument('--input',required=True,type=Path)
     parser.add_argument('--results',required=True,type=Path)
     parser.add_argument('--output',required=True,type=Path)
@@ -97,7 +99,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='memory-retrieval-') as directory:
         store=Store(directory)
         principal,count=seed_candidates(store,inputs['cases'],results['runs'])
-        report=run_benchmark(store,principal,'rehearsal')
+        report=run_benchmark(store,principal,'rehearsal',retrieval_mode=args.retrieval_mode)
         report.update(candidate_count=count,input_sha256=hashlib.sha256(args.input.read_bytes()).hexdigest(),
                       results_sha256=hashlib.sha256(args.results.read_bytes()).hexdigest())
     output.parent.mkdir(parents=True,exist_ok=True)

@@ -1,0 +1,11 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>记忆中枢第二轮并行执行</title>
+<style>:root{--bg:#faf8f4;--card:#fff;--ink:#29251f;--muted:#766e65;--line:#ded6cb;--accent:#93472f}@media(prefers-color-scheme:dark){:root{--bg:#171614;--card:#24211e;--ink:#f0e9de;--muted:#bab0a4;--line:#484035;--accent:#e8a38a}}body{background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,"PingFang SC",sans-serif;max-width:1050px;margin:auto;padding:30px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px;margin:16px 0}h1{font-size:29px}h2{font-size:21px}p{color:var(--muted)}a,strong{color:var(--accent)}table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--line);padding:12px;text-align:left}</style>
+<h1>第二轮并行任务：完成与取舍</h1><p>2026-10-01 · 三个子任务并行，主任务集成。记忆处理预算增加0，正式记忆保持不变。</p>
+<div class="grid">
+<section><strong>任务一 · 已完成</strong><h2>相关性标注与评分</h2><p>冻结10个问题、16条候选的逐项标签：4正例、6无目标问题。评分拒绝来源和查询漂移；空结果不冒充完美召回。</p><a href="../RETRIEVAL-RELEVANCE-2026-10-01.md">评分方法</a></section>
+<section><strong>任务二 · 已完成</strong><h2>隔离治理试运行</h2><p>16候选生成1份主题MD。重复检出16条、关联44个，再次采用新增0条。5页MD无损拼接，可信上下文仍为0条。</p><a href="../GOVERNANCE-PILOT-2026-10-01.md">试运行报告</a></section>
+<section><strong>任务三 · 实验完成</strong><h2>轻量检索对照</h2><p>严格方案减少噪音，但漏召回更多。因此保留原默认，只提供显式实验入口。出处、时间、治理和预算继续独立过滤。</p><a href="../LEXICAL-RETRIEVAL-V2.md">检索方案</a></section>
+</div>
+<section><h2>为什么不直接切换默认</h2><table><tr><th>Agent临时标签上的指标</th><th>原默认</th><th>严格实验</th></tr><tr><td>正例任务R@5</td><td>70.83%</td><td>25%</td></tr><tr><td>无目标任务正确弃答</td><td>0/6</td><td>6/6</td></tr><tr><td>不相关返回</td><td>38</td><td>0</td></tr></table><p>零噪音以遗漏正例为代价。临时标签不是独立人工gold，不是个人事实确认；闭合候选库召回不包含抽取漏掉或仅存档案的材料。</p></section>
+<section><h2>治理与读取的边界</h2><p>原文保留 → 分流与证据定位产生候选 → 选择检索方式 → 来源、时间与治理过滤 → 按整包字符预算返回可信上下文。</p><p>生产2,228条记录未变，旧900片段队列仍暂停，剩余936,936 tokens。</p></section>
+<section><h2>下一步</h2><p>扩大独立问题与相关性标注，评估兼顾召回的轻量检索，再对未见过的新小批材料做真实抽取验收。技术闭环通过不等于质量批准或全量恢复。</p><a href="../PARALLEL-PHASE2-2026-10-01.md">完整执行记录</a></section></html>

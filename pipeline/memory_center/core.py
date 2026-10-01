@@ -250,7 +250,7 @@ class Store:
                 settle(db, attempt, usage)
         return True
 
-    def snapshot(self, principal, scope, query='', history=False, limit=100, governance_filter=None):
+    def snapshot(self, principal, scope, query='', history=False, limit=100, governance_filter=None, retrieval_mode='lexical-v1'):
         permit(principal, scope, 'read')
         if not isinstance(query, str) or len(query) > 500:
             raise Invalid('查询上限 500 字符')
@@ -280,12 +280,9 @@ class Store:
             usage = json.loads(row.pop('processing_usage') or 'null') or {}
             row['review_note'] = (usage.get('review_notes') or {}).get(row['statement'])
             row['processing_method'] = usage.get('method', 'llm' if row['message_id'] != 'correction' else 'owner_correction')
-        if query.strip():
-            terms = set(re.findall(r'[a-z0-9_]+|[\u4e00-\u9fff]', query.lower()))
-            def score(row):
-                text = ' '.join(row[k] for k in ('statement', 'display_statement', 'subject', 'topic')).lower()
-                return sum(t in text for t in terms) + 5 * (query.lower() in text)
-            rows = sorted((r for r in rows if score(r)), key=score, reverse=True)
+        from .retrieval_ranking import search_records
+        if retrieval_mode not in ('lexical-v1','lexical-v2'):raise Invalid('检索模式无效')
+        rows=search_records(rows,query,retrieval_mode)
         if governance_filter:
             if governance_filter not in ('candidate','verified','owner_corrected','historical','rejected','usable','history'):
                 raise Invalid('治理筛选无效')
@@ -300,7 +297,7 @@ class Store:
             if isinstance(job['usage'], dict):
                 job['usage'].pop('review_notes', None)
         return {'records': rows[:limit], 'total': len(rows), 'truncated': len(rows) > limit,
-                'status_counts':status_counts,'jobs': jobs, 'scope': scope, 'retrieval': 'lexical-v1', 'generated_at': time.time()}
+                'status_counts':status_counts,'jobs': jobs, 'scope': scope, 'retrieval': retrieval_mode, 'generated_at': time.time()}
 
     def materials(self, principal, offset=0, limit=40):
         """Owner workbench inventory. Keep source payloads out of the list response."""
