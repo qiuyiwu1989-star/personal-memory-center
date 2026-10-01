@@ -138,7 +138,9 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
             with store.db() as db:
                 row=db.execute('SELECT id,state,attempts,error,usage,scope FROM extraction_runs WHERE id=? AND owner=?',(job_id,p['owner'])).fetchone()
         if not row:raise ValueError('Job not found')
-        permit(p,row['scope'],'read');return dict(row)
+        permit(p,row['scope'],'read')
+        from .source_index_queue import status as index_status
+        return dict(row) | {'index_status':index_status(store,p,row['scope'])}
 
     mcp_app=mcp.streamable_http_app()
     @contextlib.asynccontextmanager

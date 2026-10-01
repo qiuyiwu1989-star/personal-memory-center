@@ -80,6 +80,8 @@ class Store:
         setup_entities(self)
         from .source_discovery import setup as setup_discovery
         setup_discovery(self)
+        from .source_index_queue import setup as setup_index_queue
+        setup_index_queue(self)
 
     @contextmanager
     def db(self):
@@ -154,6 +156,8 @@ class Store:
             db.execute('INSERT INTO jobs(id,source_id,state,created) VALUES(?,?,?,?)',
                        (jid, sid, 'archived' if policy == 'archive' else 'received', time.time()))
             db.execute('INSERT INTO source_envelopes VALUES(?,?,?)', (sid, encoded(envelope), policy))
+            from .source_index_queue import enqueue as enqueue_index
+            enqueue_index(db, principal['owner'], scope)
             return {'id': sid, 'job_id': jid, 'duplicate': False}
 
     def process_one(self, model):
@@ -268,7 +272,10 @@ class Store:
             governed = {r['record_id']: dict(r) for r in db.execute('SELECT g.* FROM record_governance g JOIN records r ON r.id=g.record_id WHERE r.owner=? AND r.scope=?', (principal['owner'], scope))}
         with self.db() as db:
             translations = {r['record_id']:r['text'] for r in db.execute("SELECT t.record_id,t.text FROM record_translations t JOIN records r ON r.id=t.record_id WHERE r.owner=? AND r.scope=? AND t.language='zh'", (principal['owner'],scope))}
+        from .source_index_queue import status as index_status
+        index_states={scope:index_status(self,principal,scope) for scope in {row['scope'] for row in rows}}
         for row in rows:
+            row['index_status']=index_states[row['scope']]
             row['display_statement'] = translations.get(row['id'],row['statement'])
             row['translated'] = row['id'] in translations
             row['governance'] = metadata(row, governed.get(row['id']))

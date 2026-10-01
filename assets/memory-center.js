@@ -66,6 +66,8 @@
       card.append(node('h3',item.title||'未命名资料'),node('p',new Date(item.created*1000).toLocaleString('zh-CN')+' · '+item.message_count+' 段内容 · '+item.scope,'muted'));
       const state=item.state==='archived'?'原文已归档 · 未调用模型':item.state==='applied'?'已完成提炼 · '+item.claim_count+' 条记忆':item.state==='failed'?'处理失败':item.state==='processing'?'正在提炼':'等待处理';
       card.append(node('span',state,'tag'),node('p',item.preview||'无文字预览','material-preview'));
+      const indexState=item.index_status?.state;
+      if(indexState && indexState!=='idle')card.append(node('p',indexState==='ready'?'本范围原文索引已更新':indexState==='failed'?'原文索引待重试':'本范围原文索引更新中','muted'));
       if(item.method_version!=='legacy')card.append(node('p','提炼方法 '+item.method_version,'muted'));
       const buttons=node('div',undefined,'tile-actions'),read=node('button','查看原文');
       read.addEventListener('click',async()=>{read.disabled=true;try{const raw=await api('/materials/'+item.id);openDocument(item.title||'原始资料',raw.messages.map(m=>'['+m.role+'] '+m.text).join('\n\n'));}catch(err){notice(err.message,true);}finally{read.disabled=false;}});buttons.append(read);

@@ -351,6 +351,22 @@ def start_worker(store, model):
             stop.wait(0.2 if busy else 2)
     thread = threading.Thread(target=work, name='memory-center-worker', daemon=True)
     thread.start()
+    def index_work():
+        from .source_index_queue import work_once
+        last_error = None
+        while not stop.is_set():
+            try:
+                result = work_once(store)
+                last_error = None
+                busy = result['state'] != 'idle'
+            except Exception as exc:
+                kind = type(exc).__name__
+                if kind != last_error:
+                    logging.getLogger(__name__).warning('Memory source index: %s', kind)
+                    last_error = kind
+                busy = False
+            stop.wait(0.2 if busy else 2)
+    threading.Thread(target=index_work, name='memory-source-index-worker', daemon=True).start()
     return stop
 
 
