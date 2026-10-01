@@ -1,6 +1,7 @@
 """Synthetic automatic-ingest/index integration; no model/provider/production use."""
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from pipeline.memory_center.core import Store
 from pipeline.memory_center import source_discovery as discovery
@@ -43,5 +44,16 @@ class IndexQueueIntegrationTests(unittest.TestCase):
         adapter.execute('SELECT * FROM scope_index_queue WHERE owner=? AND scope=?',('synthetic-owner','synthetic-scope'))
         self.assertEqual(pg.calls[0][0],'SELECT pg_advisory_xact_lock(7169283401)')
         self.assertEqual(pg.calls[1],('SELECT * FROM scope_index_queue WHERE owner=%s AND scope=%s',('synthetic-owner','synthetic-scope')))
+
+    def test_queue_migration_split_is_valid_for_postgres_adapter(self):
+        class FakePG:
+            def __init__(self):self.calls=[]
+            def execute(self,sql,params=()):self.calls.append(sql)
+        pg=FakePG()
+        Connection(pg).executescript(Path('pipeline/memory_center/migrations/006_scope_index_queue.sql').read_text())
+        self.assertEqual(len(pg.calls),2)
+        for sql in pg.calls:
+            meaningful='\n'.join(line for line in sql.splitlines() if not line.lstrip().startswith('--')).strip()
+            self.assertTrue(meaningful.startswith(('CREATE TABLE','CREATE INDEX')))
 
 if __name__=='__main__':unittest.main()

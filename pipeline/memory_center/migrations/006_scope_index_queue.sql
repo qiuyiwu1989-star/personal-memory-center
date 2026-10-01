@@ -1,4 +1,4 @@
--- Owner/scope-coalesced technical index work; no extraction or budget fields.
+-- Owner/scope-coalesced technical index work, no extraction or budget fields.
 CREATE TABLE IF NOT EXISTS scope_index_queue(
  owner TEXT NOT NULL, scope TEXT NOT NULL,
  generation INTEGER NOT NULL, indexed_generation INTEGER NOT NULL,
