@@ -189,6 +189,7 @@ class Store:
         usage = None
         try:
             plan, usage = model.extract_source(source) if hasattr(model,'extract_source') else model.extract(json.loads(source['payload']))
+            source['processing_method_version'] = (usage or {}).get('method_version')
             try:
                 claims = validate_plan(plan, source)
             except Invalid:
@@ -274,6 +275,8 @@ class Store:
             evidence = next((m for m in messages if m['id'] == row['message_id']), {})
             row['source_title'] = evidence.get('source_title', row['source_key'])
             row['source_date'] = evidence.get('created_at')
+            from .claim_context import evidence_context
+            row['evidence_context'] = evidence_context(evidence,row['source_type'])
             usage = json.loads(row.pop('processing_usage') or 'null') or {}
             row['review_note'] = (usage.get('review_notes') or {}).get(row['statement'])
             row['processing_method'] = usage.get('method', 'llm' if row['message_id'] != 'correction' else 'owner_correction')
@@ -421,7 +424,19 @@ def validate_plan(plan, source):
             status = 'agent_suggested'
         elif message['role'] == 'user' and source['trusted_user']:
             status = 'user_stated'
-        claims.append(c | {'status': status})
+        from .claim_context import evidence_context, contains_immediate_command
+        if source.get('processing_method_version') == '2026-10-01.6':
+            if contains_immediate_command(c['statement']):
+                raise Invalid('即时开工或续写指令不能混入长期记忆，请只提取明确的项目约束')
+            context = evidence_context(message,source['source_type'])
+            if source['source_type'] != 'imported_summary':
+                if context['source_date'] and context['source_date'] not in c['statement']:
+                    raise Invalid('历史陈述必须保留来源日期，不能把历史要求当成当前状态')
+                if c['topic']=='projects' and context['conversation_title'] and context['conversation_title'] not in c['statement']:
+                    raise Invalid('项目陈述必须保留来源对话标题，不能猜测项目身份或使用模糊指代')
+            elif not c['statement'].startswith(('摘要记载','摘要主张')):
+                raise Invalid('二手摘要必须明确归属，不能升格为本人陈述')
+        claims.append(c | {'status': status, 'evidence_context': evidence_context(message,source['source_type'])})
     if sum(c['status']=='agent_suggested' for c in claims)>2:
         raise Invalid('单批最多保留两条必要的助手建议')
     return claims

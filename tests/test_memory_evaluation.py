@@ -81,3 +81,35 @@ class SuiteGateTest(unittest.TestCase):
         self.assertFalse(result['quality_approved']);self.assertFalse(result['production_dispatch_enabled'])
         run['review']['time_handling']='fail'
         self.assertEqual(suite_gate([1],[run],'v',1024)['failed_cases'],[1])
+
+class TemporalScopeGuardTest(unittest.TestCase):
+    def test_source_time_is_not_event_time_and_summary_is_not_anchor(self):
+        from pipeline.memory_center.claim_context import evidence_context
+        message={'created_at':'2025-09-27T06:46:20Z','source_title':'Synthetic writing discussion'}
+        direct=evidence_context(message,'conversation')
+        self.assertEqual(direct['relative_time_anchor'],'2025-09-27')
+        self.assertIsNone(direct['event_time']);self.assertIsNone(direct['project_identity'])
+        summary=evidence_context(message,'imported_summary')
+        self.assertEqual(summary['date_role'],'summary_update');self.assertIsNone(summary['relative_time_anchor'])
+        self.assertIsNone(evidence_context({'created_at':'2025-99-42'},'conversation')['source_date'])
+
+    def test_new_method_requires_date_scope_and_drops_immediate_commands(self):
+        from pipeline.memory_center.core import validate_plan,encoded,Invalid
+        message={'id':'1','role':'user','text':'开始第六讲，不要虚构故事。','created_at':'2025-10-06T00:00:00Z','source_title':'合成课程讨论'}
+        source={'source_type':'conversation','trusted_user':False,'payload':encoded([message]),'processing_method_version':'2026-10-01.6'}
+        claim={'topic':'projects','kind':'decision','subject':'user','message_id':'1','quote':'不要虚构故事。','statement':'用户要求不要虚构故事。'}
+        with self.assertRaisesRegex(Invalid,'来源日期'):validate_plan({'claims':[claim]},source)
+        claim['statement']='2025-10-06，用户要求不要虚构故事。'
+        with self.assertRaisesRegex(Invalid,'对话标题'):validate_plan({'claims':[claim]},source)
+        claim['statement']='2025-10-06，在合成课程讨论中，用户要求不要虚构故事。'
+        result=validate_plan({'claims':[claim]},source)[0]
+        self.assertEqual(result['evidence_context']['conversation_title'],'合成课程讨论')
+        claim['statement']+='开始第六讲。'
+        with self.assertRaisesRegex(Invalid,'即时'):validate_plan({'claims':[claim]},source)
+        source.pop('processing_method_version')
+        self.assertEqual(len(validate_plan({'claims':[claim]},source)),1)
+
+    def test_historical_start_report_is_not_an_imperative(self):
+        from pipeline.memory_center.claim_context import contains_immediate_command
+        self.assertFalse(contains_immediate_command('用户在去年开始了第六讲。'))
+        self.assertTrue(contains_immediate_command('用户要求继续写下一章。'))

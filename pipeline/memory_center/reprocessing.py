@@ -23,6 +23,8 @@ def preview(store, principal, source_id, plan, method_version):
         source=db.execute('SELECT * FROM sources WHERE id=? AND owner=?',(source_id,principal['owner'])).fetchone()
         if not source:raise Invalid('来源不存在')
         permit(principal,source['scope'],'read');permit(principal,source['scope'],'write')
+        source=dict(source)
+        source['processing_method_version']=method_version
         claims=validate_plan(plan,source)
         old=[dict(r) for r in db.execute('SELECT * FROM records WHERE source_id=?',(source_id,))]
         changes=[]
