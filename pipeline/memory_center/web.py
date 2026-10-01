@@ -236,6 +236,21 @@ def blueprint(store, grants, model, browser_principal=None):
         data=body()
         return jsonify(Bulk(store).create(g.memory_principal,batch_id,data.get('token_limit',1_000_000))), 202
 
+    @bp.get('/bulk/<batch_id>/replan')
+    def replan_get(batch_id):
+        from .replan import Replans
+        return jsonify(Replans(store).get(g.memory_principal,batch_id,int(request.args.get('offset','0'))))
+
+    @bp.post('/bulk/<batch_id>/replan')
+    def replan_create(batch_id):
+        from .replan import Replans
+        return jsonify(Replans(store).create(g.memory_principal,batch_id)),202
+
+    @bp.post('/bulk/<batch_id>/replan/adopt')
+    def replan_adopt(batch_id):
+        from .replan import Replans
+        return jsonify(Replans(store).adopt(g.memory_principal,batch_id,body().get('plan_id')))
+
     @bp.post('/bulk/<batch_id>/control')
     def bulk_control(batch_id):
         from .bulk import Bulk
