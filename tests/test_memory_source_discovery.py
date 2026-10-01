@@ -147,3 +147,22 @@ class SourceDiscoveryTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+class LegacyBulkVisibilityTests(unittest.TestCase):
+    def test_old_flat_bulk_not_discovered_until_current_parser_proof(self):
+        from pipeline.memory_center.claude import PARSER_VERSION
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(directory);p=principal();scope='synthetic-scope'
+            sid=store.ingest(p,{'scope':scope,'source_key':'claude:archive:synthetic',
+                'source_type':'conversation','processing_policy':'archive',
+                'messages':[{'id':'u','role':'user','text':'合成可见预算'}]})['id']
+            result=discovery.rebuild(store,p,scope)
+            self.assertEqual(result['skipped_legacy_sources'],1)
+            self.assertEqual(discovery.search(store,p,scope,'预算')['total'],0)
+            with store.db() as db:
+                db.execute('UPDATE source_envelopes SET metadata=? WHERE source_id=?',(encoded({'parser_version':PARSER_VERSION}),sid))
+            discovery.rebuild(store,p,scope)
+            hit=discovery.search(store,p,scope,'预算')['results'][0]
+            with store.db() as db:db.execute('DELETE FROM source_envelopes WHERE source_id=?',(sid,))
+            self.assertEqual(discovery.search(store,p,scope,'预算')['total'],0)
+            with self.assertRaises(Invalid):discovery.read(store,p,scope,hit['locator'])

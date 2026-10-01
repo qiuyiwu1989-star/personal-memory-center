@@ -37,3 +37,15 @@ coverage = import_batch(store, principal, scope, batch_id)
 ## 验证
 
 7 项显式合成测试覆盖默认 dry-run 数据库完全不变、零模型成本、不同调用者幂等、assistant/external 原角色与 trusted_user=False、archive job 状态、原 bulk 状态/预算/segment 不变、旧 parser 拒绝、全批排除校验失败时零写、结构化工具字段拒绝、owner/scope/action 防护。没有真实原文、私钥、生产写或模型调用；线上导入与覆盖核验由主任务显式决定。
+
+## 旧批次旁路：从已验证原件重新解析
+
+旧批次缺当前 parser 标记时，可以用独立入口 `import_archive(store, principal, scope, archive_batch_id, dry_run=True)`。这不是更改旧 marker 或恢复全量提炼：它根本不读取旧 bulk 投影，不创建 bulk 批次、不调整旧批次状态和预算。
+
+目标 scope 必须有 read/source_read/write，原始 `claude:archive` scope 也必须有 read/source_read。固定路径仅限 conversations.json，通过 bulk._source_file 检查归档 catalog owner、archived_verified 状态、文件大小和 SHA-256；读取 bytes 后再次与 catalog SHA 对照，再用 replan.preview/claude.messages 的当前可见 parser 纯解析。全计划准备后、执行后再验证原归档哈希不变。每条来源 metadata.locator 保存原文件 SHA、归档批次、conversation/segment 定位，来源键不依赖旧 bulk 批次。
+
+比通用 Claude parser 更保守：如果原消息只有 flattened text 而无 structured content，无法证明其已排除思考/工具内容，整批拒绝，不走 legacy fallback。其他可见性校验与批次 adapter 相同。可先 dry-run 获得拒绝原因，不修改任何旧材料；不能改 marker 或删除字段绕过拒绝。
+
+返回 coverage=`conversations.json-only`、总归档对话数和没有可见正文的对话数；不覆盖 memories 摘要、附件、projects 等文件。零模型调用与 archive-only 状态仍适用。执行中原件变化会报错并停止；此前已归档的版本仍绑定已核验 snapshot SHA，不自动删除，需显式复盘后再续跑。
+
+现在共 11 项合成测试，补充独立旁路 dry-run/导入幂等、旧 bulk 无 marker 也完全不变、思考/工具排除、原 SHA 元信息、权限与损坏文件/flattened 拒绝、解析期间原文件变化时首次写入前拒绝。没有生产写。

@@ -67,6 +67,19 @@ def _visible(message):
     return ''.join(visible)
 
 
+def _eligible(source):
+    # Legacy bulk flattened text can contain unlabelled thinking/tool traces.
+    # Tag masking alone cannot prove that it is a visible-body projection.
+    if source['source_type'] == 'conversation' and (source['principal'] == 'archive-batch' or source['source_key'].startswith('claude:archive:')):
+        from .claude import PARSER_VERSION
+        try:
+            metadata=json.loads(source.get('parser_metadata') or '{}')
+        except (TypeError,ValueError):
+            return False
+        return isinstance(metadata,dict) and metadata.get('parser_version') == PARSER_VERSION
+    return True
+
+
 def _messages(source):
     try:
         payload = json.loads(source['payload'])
@@ -109,11 +122,13 @@ def rebuild(store, principal, scope, force=False):
     _permit(principal, scope, write=True)
     if type(force) is not bool:
         raise Invalid('force 必须是布尔值')
-    counts = {'indexed_sources': 0, 'unchanged_sources': 0, 'messages': 0, 'chunks': 0, 'removed_sources': 0}
+    counts = {'indexed_sources': 0, 'unchanged_sources': 0, 'messages': 0, 'chunks': 0, 'removed_sources': 0, 'skipped_legacy_sources': 0}
     with store.db() as db:
         db.execute('BEGIN IMMEDIATE')
         sources = [dict(row) for row in db.execute(
-            'SELECT * FROM sources WHERE owner=? AND scope=? ORDER BY created,id', (principal['owner'], scope))]
+            'SELECT s.*,e.metadata parser_metadata FROM sources s LEFT JOIN source_envelopes e ON e.source_id=s.id WHERE s.owner=? AND s.scope=? ORDER BY s.created,s.id', (principal['owner'], scope))]
+        counts['skipped_legacy_sources'] = sum(not _eligible(source) for source in sources)
+        sources = [source for source in sources if _eligible(source)]
         versions = {row['source_id']: dict(row) for row in db.execute(
             'SELECT * FROM source_discovery_versions WHERE owner=? AND scope=?', (principal['owner'], scope))}
         active = {source['id'] for source in sources}
@@ -165,8 +180,9 @@ def search(store, principal, scope, query, max_chars=6000, offset=0, limit=20):
         # Read each current source payload once, not once per chunk. The hash
         # guard still excludes payload-only drift before returning any result.
         fingerprints = {row['id']: _hash([row['payload'], row['source_type'], row['source_key']])
-                        for row in db.execute('SELECT id,payload,source_type,source_key FROM sources WHERE owner=? AND scope=?',
-                                              (principal['owner'], scope))}
+                        for raw in db.execute('SELECT s.id,s.payload,s.principal,s.source_type,s.source_key,e.metadata parser_metadata FROM sources s LEFT JOIN source_envelopes e ON e.source_id=s.id WHERE s.owner=? AND s.scope=?',
+                                              (principal['owner'], scope))
+                        for row in [dict(raw)] if _eligible(row)}
         rows = [dict(row) for row in db.execute(
             'SELECT c.*,v.payload_digest FROM source_discovery_chunks c JOIN sources s ON s.id=c.source_id '
             'JOIN source_discovery_versions v ON v.source_id=c.source_id '
@@ -177,7 +193,7 @@ def search(store, principal, scope, query, max_chars=6000, offset=0, limit=20):
     for row in rows:
         fingerprint = fingerprints.get(row['source_id'])
         # Ensure payload-only drift is invalidated as well as declared digest.
-        if row['payload_digest'] != fingerprint:
+        if fingerprint is None or row['payload_digest'] != fingerprint:
             continue
         score = score_record_v3({'statement': row['text'], 'source_title': row['source_title']}, query) if query.strip() else 0
         if not query.strip() or score > 0:
@@ -209,14 +225,14 @@ def read(store, principal, scope, locator, offset=0, max_chars=4000):
     if type(offset) is not int or offset < 0:
         raise Invalid('原文分页位置无效')
     with store.db() as db:
-        row = db.execute('SELECT c.*,s.payload,s.source_type,v.payload_digest FROM source_discovery_chunks c '
-                         'JOIN sources s ON s.id=c.source_id JOIN source_discovery_versions v ON v.source_id=c.source_id '
+        row = db.execute('SELECT c.*,s.payload,s.source_type,s.principal,s.source_key current_source_key,e.metadata parser_metadata,v.payload_digest FROM source_discovery_chunks c '
+                         'JOIN sources s ON s.id=c.source_id JOIN source_discovery_versions v ON v.source_id=c.source_id LEFT JOIN source_envelopes e ON e.source_id=s.id '
                          'WHERE c.id=? AND c.owner=? AND c.scope=? AND s.owner=? AND s.scope=? AND s.digest=c.source_digest AND v.index_version=?',
                          (locator['chunk_id'],principal['owner'],scope,principal['owner'],scope,INDEX_VERSION)).fetchone()
     if not row:
         raise Invalid('原文 locator 不存在或版本已变化')
     row = dict(row)
-    if _locator(row) != locator or row['payload_digest'] != _hash([row['payload'],row['source_type'],row['source_key']]):
+    if not _eligible(row | {'source_key':row['current_source_key']}) or _locator(row) != locator or row['payload_digest'] != _hash([row['payload'],row['source_type'],row['current_source_key']]):
         raise Invalid('原文 locator 不存在或版本已变化')
     messages = _messages(row)
     index = locator['message_index']

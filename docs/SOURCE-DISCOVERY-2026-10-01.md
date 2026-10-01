@@ -45,3 +45,5 @@ search 的 offset 按结果片段分页，limit 为 1–100；read 的 offset �
 ## 验证
 
 9 项显式合成测试覆盖：增量/force 幂等和来源不变；角色与来源标签；thinking 排除及字符定位；权限与跨 owner/scope 拒绝；digest/payload 漂移及删除失效；完整 JSON 字符预算、无损消息分页；检索分页稳定；非法参数。不会调用模型，测试来源以 archive 策略录入，不安排提炼任务。真实 PostgreSQL 和公开 MCP/REST 接入由主任务另行验证。
+
+旧 Claude archive-batch 的 conversation 来源若缺当前可见正文 parser 证明，将在索引与读取时排除；仅屏蔽 thinking 标签无法证明旧扁平文本安全。重建结果返回 skipped_legacy_sources。原件与旧候选保留，需要从已校验原件重新解析可见正文后建立可读副本。
