@@ -27,11 +27,23 @@ def preview(store, principal, source_id, plan, method_version):
         source['processing_method_version']=method_version
         claims=validate_plan(plan,source)
         old=[dict(r) for r in db.execute('SELECT * FROM records WHERE source_id=?',(source_id,))]
+        from .claim_context import evidence_context
+        from .candidate_links import candidate_links
+        messages={m['id']:m for m in json.loads(source['payload'])}
+        for record in old:
+            evidence=messages.get(record['message_id'],{})
+            record.update(source_type=source['source_type'],role=evidence.get('role'),
+                          evidence_context=evidence_context(evidence,source['source_type']))
         changes=[]
         for claim in claims:
+            evidence=messages.get(claim['message_id'],{})
+            linked_claim=dict(claim,owner=source['owner'],scope=source['scope'],source_id=source_id,
+                              source_type=source['source_type'],role=evidence.get('role'))
+            links=candidate_links(linked_claim,old)
+
             identical=[r['id'] for r in old if r['statement']==claim['statement'] and r['message_id']==claim['message_id']]
             related=[r['id'] for r in old if r['subject']==claim['subject'] and r['kind']==claim['kind'] and r['lifecycle']=='active']
-            changes.append({'candidate':claim,'comparison':'duplicate' if identical else 'related_needs_review' if related else 'new',
+            changes.append({'associations':links,'candidate':claim,'comparison':'duplicate' if identical else 'related_needs_review' if related else 'new',
                             'existing_ids':identical or related, 'existing':[{'id':r['id'],'statement':r['statement'],'lifecycle':r['lifecycle'],'status':r['status']} for r in old if r['id'] in (identical or related)]})
         result={'id':uid(),'source_id':source_id,'method_version':method_version,'changes':changes,
                 'policy':'preview-only-no-replacement','semantic_verified':False}

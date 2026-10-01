@@ -33,14 +33,21 @@ def aggregate(reviews):
             'quality_gate_passed':False}
 
 
-def suite_gate(expected_ids,runs,version,max_output_tokens):
+def suite_gate(expected_ids,runs,version,max_output_tokens,acceptance_cases=None):
     """Check comparable coverage and explicit reviews; never approve production."""
     expected=set(expected_ids)
     if len(expected)!=len(expected_ids) or not expected:
         raise ValueError('Expected case identifiers must be unique and nonempty')
     grouped={}
     for run in runs:grouped.setdefault(run.get('sample_index'),[]).append(run)
-    reasons=[];missing=[];review_pending=[];failed=[];incomparable=[]
+    reasons=[];missing=[];review_pending=[];failed=[];incomparable=[];acceptance_pending=[];omissions=[];acceptance_failed=[]
+    contracts={}
+    if acceptance_cases is not None:
+        for contract in acceptance_cases:
+            identifier=contract.get("sample_index")
+            if identifier in contracts or identifier not in expected:
+                raise ValueError("Acceptance cases must match unique expected identifiers")
+            contracts[identifier]=contract
     for case in sorted(expected):
         items=grouped.get(case,[])
         if not items:missing.append(case);continue
@@ -54,13 +61,68 @@ def suite_gate(expected_ids,runs,version,max_output_tokens):
         dimensions=('semantic_support','speaker_attribution','time_handling','scope_handling','durable_value')
         if any(review.get(key) not in ('pass','fail') for key in dimensions):review_pending.append(case)
         elif any(review[key]=='fail' for key in dimensions):failed.append(case)
+        if case not in contracts:
+            acceptance_pending.append(case)
+        else:
+            check=acceptance_check(contracts[case],run)
+            if check['pending']:acceptance_pending.append(case)
+            if check['missing_required']:omissions.append(case)
+            if check['failures']:acceptance_failed.append(case)
     unexpected=sorted(set(grouped)-expected,key=str)
     for key,value in [('missing_cases',missing),('incomparable_cases',incomparable),
-                      ('review_pending_cases',review_pending),('failed_cases',failed),('unexpected_cases',unexpected)]:
+                      ('review_pending_cases',review_pending),('failed_cases',failed),('unexpected_cases',unexpected),
+                      ('acceptance_pending_cases',acceptance_pending),('omission_cases',omissions),
+                      ('acceptance_failed_cases',acceptance_failed)]:
         if value:reasons.append(key)
     return {'expected_count':len(expected),'observed_count':len(set(grouped)&expected),
             'version':version,'max_output_tokens':max_output_tokens,
             'missing_cases':missing,'incomparable_cases':incomparable,
             'review_pending_cases':review_pending,'failed_cases':failed,'unexpected_cases':unexpected,
-            'blocking_reasons':reasons,'ready_for_owner_quality_decision':not reasons,
+            'acceptance_pending_cases':acceptance_pending,'omission_cases':omissions,
+            'acceptance_failed_cases':acceptance_failed,'blocking_reasons':reasons,'ready_for_owner_quality_decision':not reasons,
             'quality_approved':False,'production_dispatch_enabled':False}
+
+
+def acceptance_check(contract,run):
+    """Check explicit human/evaluator fact-to-claim review, never infer semantics.
+
+    Contracts are authored before inspecting extraction output. The review must
+    map every required fact to supported output claims and explain the match.
+    This mechanically prevents empty-output and unchecked-omission passes; it
+    cannot establish that the evaluator's semantic judgment is correct.
+    """
+    required=contract.get('required_facts')
+    forbidden=contract.get('forbidden_facts')
+    if not isinstance(required,list) or not isinstance(forbidden,list):
+        raise ValueError('Acceptance contract requires explicit fact lists')
+    identifiers=[fact.get('id') for fact in required+forbidden if isinstance(fact,dict)]
+    if len(identifiers)!=len(required)+len(forbidden) or any(not isinstance(i,str) or not i for i in identifiers) or len(set(identifiers))!=len(identifiers):
+        raise ValueError('Acceptance fact identifiers must be unique and nonempty')
+    claims=run.get('claims')
+    if claims is None:claims=(run.get('plan') or {}).get('claims')
+    if not isinstance(claims,list):claims=[]
+    review=(run.get('review') or {}).get('acceptance') or {}
+    matches=review.get('required_matches') or {}
+    exclusions=review.get('forbidden_checks') or {}
+    pending=[];missing=[];failures=[]
+    for fact in required:
+        match=matches.get(fact['id'])
+        if not isinstance(match,dict) or match.get('verdict') not in ('pass','fail') or not str(match.get('reason') or '').strip():
+            pending.append(fact['id']);continue
+        indices=match.get('claim_indices')
+        valid=(isinstance(indices,list) and bool(indices) and
+               all(type(i) is int and 0<=i<len(claims) and isinstance(claims[i],dict) and
+                   str(claims[i].get('statement') or '').strip() and str(claims[i].get('quote') or '').strip() for i in indices) and len(set(indices))==len(indices))
+        if match['verdict']=='fail' or not valid:missing.append(fact['id'])
+    for fact in forbidden:
+        check=exclusions.get(fact['id'])
+        if not isinstance(check,dict) or check.get('verdict') not in ('pass','fail') or not str(check.get('reason') or '').strip():
+            pending.append(fact['id'])
+        elif check['verdict']=='fail':failures.append(fact['id'])
+    for dimension in ('no_unexpected_claims','no_duplicate_claims'):
+        check=review.get(dimension)
+        if not isinstance(check,dict) or check.get('verdict') not in ('pass','fail') or not str(check.get('reason') or '').strip():pending.append(dimension)
+        elif check['verdict']=='fail':failures.append(dimension)
+    return {'required_count':len(required),'pending':pending,'missing_required':missing,
+            'failures':failures,'acceptance_passed':not (pending or missing or failures),
+            'quality_approved':False}

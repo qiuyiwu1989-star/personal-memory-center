@@ -1,0 +1,235 @@
+{
+  "synthetic": true,
+  "cases": [
+    {
+      "sample_index": 1,
+      "source_type": "conversation",
+      "messages": [
+        {
+          "id": "1",
+          "role": "user",
+          "text": "身份更正：合成人物林乙是合作顾问，不是我的配偶。",
+          "source_title": "合成验收项目",
+          "created_at": "2025-08-01T00:00:00Z"
+        }
+      ],
+      "required_facts": [
+        {
+          "id": "identity",
+          "description": "顾问关系及对配偶误认的明确否定"
+        }
+      ],
+      "forbidden_facts": [
+        {
+          "id": "old_identity",
+          "description": "不得继续保存配偶关系为当前事实"
+        }
+      ]
+    },
+    {
+      "sample_index": 2,
+      "source_type": "conversation",
+      "messages": [
+        {
+          "id": "2",
+          "role": "user",
+          "text": "本书项目的长期边界：不要编造我的个人经历，可以使用公开且可核实的案例。",
+          "source_title": "合成验收项目",
+          "created_at": "2025-08-01T00:00:00Z"
+        }
+      ],
+      "required_facts": [
+        {
+          "id": "boundary",
+          "description": "不虚构个人经历，适用本书项目"
+        }
+      ],
+      "forbidden_facts": [
+        {
+          "id": "invented",
+          "description": "不得把稿件人物故事当成作者真实经历"
+        }
+      ]
+    },
+    {
+      "sample_index": 3,
+      "source_type": "conversation",
+      "messages": [
+        {
+          "id": "3",
+          "role": "user",
+          "text": "合成项目决定保留 PostgreSQL，因为已有备份和运维体系。",
+          "source_title": "合成验收项目",
+          "created_at": "2025-08-01T00:00:00Z"
+        }
+      ],
+      "required_facts": [
+        {
+          "id": "decision",
+          "description": "保留数据库的决策与理由"
+        }
+      ],
+      "forbidden_facts": [
+        {
+          "id": "universal",
+          "description": "不得提升为用户永远只使用一种数据库"
+        }
+      ]
+    },
+    {
+      "sample_index": 4,
+      "source_type": "conversation",
+      "messages": [
+        {
+          "id": "4",
+          "role": "user",
+          "text": "系统配置调整：保留七个智能体：灵感、构思、画面、风格、声音、构图、融合。现在帮我写新闻稿。",
+          "source_title": "合成验收项目",
+          "created_at": "2025-08-01T00:00:00Z"
+        }
+      ],
+      "required_facts": [
+        {
+          "id": "configuration",
+          "description": "调整后的七项完整配置"
+        }
+      ],
+      "forbidden_facts": [
+        {
+          "id": "command",
+          "description": "即时新闻稿任务不得作为长期记忆"
+        }
+      ]
+    },
+    {
+      "sample_index": 5,
+      "source_type": "conversation",
+      "messages": [
+        {
+          "id": "5",
+          "role": "user",
+          "text": "继续写下一章，今天先写三千字。",
+          "source_title": "合成验收项目",
+          "created_at": "2025-08-01T00:00:00Z"
+        }
+      ],
+      "required_facts": [],
+      "forbidden_facts": [
+        {
+          "id": "temporary",
+          "description": "下一章与字数即时任务不得作为持久偏好"
+        }
+      ]
+    },
+    {
+      "sample_index": 6,
+      "source_type": "conversation",
+      "messages": [
+        {
+          "id": "6",
+          "role": "assistant",
+          "text": "我建议把章节改名为合成方案，并使用六四投资配比。",
+          "source_title": "合成验收项目",
+          "created_at": "2025-08-01T00:00:00Z"
+        }
+      ],
+      "required_facts": [],
+      "forbidden_facts": [
+        {
+          "id": "assistant",
+          "description": "助手草稿建议不得当成用户决定"
+        }
+      ]
+    },
+    {
+      "sample_index": 7,
+      "source_type": "conversation",
+      "messages": [
+        {
+          "id": "7",
+          "role": "user",
+          "text": "长期原则：先验证再自动化。先跑真实样本验证，然后才自动化。",
+          "source_title": "合成验收项目",
+          "created_at": "2025-08-01T00:00:00Z"
+        }
+      ],
+      "required_facts": [
+        {
+          "id": "principle",
+          "description": "同一先验证再自动化原则保留一次"
+        }
+      ],
+      "forbidden_facts": [
+        {
+          "id": "duplicate",
+          "description": "两个近义句不得重复成为两条同一判断"
+        }
+      ]
+    },
+    {
+      "sample_index": 8,
+      "source_type": "conversation",
+      "messages": [
+        {
+          "id": "8",
+          "role": "user",
+          "text": "请润色：正文里的主人公是医院院长，第一人称写我主持了一场会议。",
+          "source_title": "合成验收项目",
+          "created_at": "2025-08-01T00:00:00Z"
+        }
+      ],
+      "required_facts": [],
+      "forbidden_facts": [
+        {
+          "id": "manuscript",
+          "description": "稿件主人公身份经历不得成为用户身份经历"
+        }
+      ]
+    },
+    {
+      "sample_index": 9,
+      "source_type": "conversation",
+      "messages": [
+        {
+          "id": "9",
+          "role": "user",
+          "text": "合成项目去年使用试验版，目前已停止该试验。",
+          "source_title": "合成验收项目",
+          "created_at": "2025-08-01T00:00:00Z"
+        }
+      ],
+      "required_facts": [
+        {
+          "id": "ended",
+          "description": "已停止试验及原先使用的历史状态"
+        }
+      ],
+      "forbidden_facts": [
+        {
+          "id": "current",
+          "description": "不得召回成仍在运行试验"
+        }
+      ]
+    },
+    {
+      "sample_index": 10,
+      "source_type": "conversation",
+      "messages": [
+        {
+          "id": "10",
+          "role": "user",
+          "text": "继续。",
+          "source_title": "合成验收项目",
+          "created_at": "2025-08-01T00:00:00Z"
+        }
+      ],
+      "required_facts": [],
+      "forbidden_facts": [
+        {
+          "id": "expanded",
+          "description": "单独继续不得推断为身份、偏好或重大决策授权"
+        }
+      ]
+    }
+  ]
+}

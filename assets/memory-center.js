@@ -294,6 +294,7 @@
     host.append(node('p','采用候选不会覆盖旧结论或自动核实；译文仅改变展示。','muted'));
     const form=node('form');const checks=[];
     data.changes.forEach((change,i)=>{const item=node('div',undefined,'diff-item'),label=node('label',undefined,'row'),check=node('input');check.type='checkbox';check.value=String(i);check.disabled=change.comparison==='duplicate';checks.push(check);label.append(check,node('span',({duplicate:'重复 · 无需再加入',new:'新增候选',related_needs_review:'有关联旧记录 · 需对照',translation:'中文展示译文'})[change.comparison]||change.comparison));item.append(label);
+      for(const link of change.associations||[])item.append(node('p',(link.relation==='exact_statement'?'同一陈述重复':'引用同一段证据')+' · '+link.record_id+'；仅关联，不代表独立佐证或自动合并。','muted'));
       if(change.candidate.original)item.append(node('p','原文：'+change.candidate.original));
       for(const old of change.existing||[])item.append(node('p','旧记录：'+old.statement,'muted'));
       item.append(node('p',change.candidate.text||change.candidate.statement,'statement'));

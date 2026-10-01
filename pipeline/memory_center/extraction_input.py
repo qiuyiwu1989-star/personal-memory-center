@@ -4,24 +4,54 @@ from .claim_context import contains_immediate_command
 from .core import Invalid
 
 
+def _visible_range(text):
+    """Separate an outer request from a clearly pasted chapter/role template.
+
+    This is source routing, never a claim that the template is false. All bytes
+    remain in the archived source; only this extraction request is reduced.
+    """
+    role = re.search(r'(?:^|\n)(?:#{1,6}\s*)?(?:你是|你将扮演)', text)
+    if role and len(text)-role.start()>400 and re.search(r'核心使命|角色设定|职责|工作流程',text[role.start():]):
+        return role.start(), 'role_template'
+    chapter = re.search(r'(?:^|\n|[。！？])\s*(?:#{1,6}\s*)?第[一二三四五六七八九十百\d]+章[:：]',text)
+    if chapter and (len(text)-chapter.start()>400 or all(word in text[chapter.start():] for word in ('核心观点','内容架构','章末思考'))):
+        return chapter.start(), 'pasted_chapter'
+    if all(word in text for word in ('核心观点','内容架构','章末思考')):
+        return 0, 'chapter_outline'
+    specification=(len(text)>800 and (len(re.findall(r'^#{1,6}\s',text,re.M))>=3 or len(re.findall(r'^\d+\.',text,re.M))>=3) and
+                   bool(re.search(r'核心使命|你是|你将扮演|角色设定',text)))
+    return (0, 'role_template') if specification else (len(text), None)
+
+
+def _configuration_hint(text):
+    # Prioritization only: the model must still establish exact support. A
+    # transient request next to a list does not erase a stated configuration.
+    return bool(re.search(r'系统|工作台|架构|配置',text) and
+                (re.search(r'(?:包含|组成|分为|设有|由).{0,24}(?:智能体|模块|agent)',text,re.I) or
+                 (re.search(r'[一二三四五六七八九十\d]+[个种类大]?\s*(?:智能体|模块|agent)',text,re.I) and
+                  len(re.findall(r'智能体|模块|agent',text,re.I))>=2)))
+
+
 def prepare_request(source_type,messages):
     prepared=[];spans={};routes={}
     for index,message in enumerate(messages):
         text=message['text']
-        # Whole pasted role specifications/outlines are reference documents.
-        specification=(len(text)>800 and (len(re.findall(r'^#{1,6}\s',text,re.M))>=3 or len(re.findall(r'^\d+\.',text,re.M))>=3) and
-                       bool(re.search(r'核心使命|你是|你将扮演|角色设定',text)))
-        outline=all(word in text for word in ('核心观点','内容架构','章末思考'))
-        route='reference_document' if specification or outline else 'conversation'
+        end_of_evidence,reference_reason=_visible_range(text)
+        assistant_reference=source_type=='conversation' and message['role']=='assistant'
+        if assistant_reference:
+            end_of_evidence=0;route='assistant_reference'
+        elif reference_reason:
+            route='mixed_reference_document' if text[:end_of_evidence].strip() else 'reference_document'
+        else:route='conversation'
         routes[message['id']]=route
         pieces=[]
-        if route=='conversation':
+        if end_of_evidence and not assistant_reference:
             start=0
             # Strip only a leading immediate command clause, preserving all
             # remaining constraints and list context byte-for-byte.
-            prefix=re.match(r'[^，。\n]+[，。\n]',text)
+            prefix=re.match(r'[^，。\n]+[，。\n]',text[:end_of_evidence])
             if prefix and contains_immediate_command(prefix.group()):start=prefix.end()
-            for match in re.finditer(r'.+?(?:\n\s*\n|$)',text[start:],re.S):
+            for match in re.finditer(r'.+?(?:\n\s*\n|$)',text[start:end_of_evidence],re.S):
                 body=match.group();offset=start+match.start();part=0
                 while part<len(body):
                     end=min(len(body),part+1000)
@@ -34,9 +64,11 @@ def prepare_request(source_type,messages):
                     if quote.strip().strip('。.!！') in ('继续','好的','好','yes','ok','continue'):continue
                     if source_type=='imported_summary' and re.search(r'SKILL\.md.*\d+\s*lines',quote):continue
                     spans[sid]={'message_id':message['id'],'quote':quote,'start':offset+end-len(quote),'end':offset+end}
-                    pieces.append({'evidence_id':sid,'text':quote})
+                    pieces.append({'evidence_id':sid,'text':quote,
+                                   'priority_hint':'explicit_configuration' if _configuration_hint(quote) else 'ordinary'})
         prepared.append({'id':message['id'],'role':message['role'],'source_title':message.get('source_title'),
-                         'created_at':message.get('created_at'),'route':route,'evidence_spans':pieces})
+                         'created_at':message.get('created_at'),'route':route,'reference_reason':reference_reason,
+                         'evidence_spans':pieces})
     return {'source_type':source_type,'messages':prepared},spans,routes
 
 

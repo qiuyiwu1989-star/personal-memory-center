@@ -40,3 +40,33 @@ class EvidenceSpanTest(unittest.TestCase):
             def _call(self,*args,**kwargs):raise AssertionError('model must not run')
         plan,usage=NoCall().extract_source({'source_type':'conversation','payload':encoded([{'id':'1','role':'user','text':'继续'}])})
         self.assertEqual(plan,{'claims':[]});self.assertTrue(usage['model_skipped']);self.assertEqual(usage['total_tokens'],0)
+
+    def test_assistant_draft_kept_as_reference_not_personal_evidence(self):
+        text='助手合成建议：建议每周进行两次复盘。'
+        source={'id':'a','role':'assistant','text':text}
+        request,spans,routes=prepare_request('conversation',[source])
+        self.assertEqual(routes['a'],'assistant_reference');self.assertFalse(spans)
+        self.assertEqual(source['text'],text)
+        # A secondhand summary must retain its own summary attribution path.
+        _,spans,_=prepare_request('imported_summary',[source]);self.assertTrue(spans)
+
+    def test_outer_user_constraint_is_separate_from_pasted_chapter(self):
+        prefix='合成项目约束：不要虚构案例。\n'
+        draft='第八章：合成稿件\n'+('建议读者每周复盘两次。'*50)
+        message={'id':'mixed','role':'user','text':prefix+draft}
+        request,spans,routes=prepare_request('conversation',[message])
+        self.assertEqual(routes['mixed'],'mixed_reference_document')
+        self.assertIn('不要虚构案例',''.join(s['quote'] for s in spans.values()))
+        self.assertNotIn('建议读者',''.join(s['quote'] for s in spans.values()))
+        for span in spans.values():self.assertEqual(span['quote'],message['text'][span['start']:span['end']])
+
+    def test_explicit_configuration_survives_mixed_temporary_request(self):
+        text='合成系统有七大智能体：\n甲智能体\n乙智能体\n丙智能体\n丁智能体\n戊智能体\n己智能体\n庚智能体。请生成一张草图。'
+        request,spans,routes=prepare_request('conversation',[{'id':'config','role':'user','text':text}])
+        self.assertEqual(routes['config'],'conversation');self.assertEqual(next(iter(spans.values()))['quote'],text)
+        self.assertEqual(request['messages'][0]['evidence_spans'][0]['priority_hint'],'explicit_configuration')
+
+    def test_unformatted_role_specification_is_reference(self):
+        text='你是一个合成写作助手。\n核心使命：产出文本。\n'+('职责：遵守写作流程。'*50)
+        _,spans,routes=prepare_request('conversation',[{'id':'template','role':'user','text':text}])
+        self.assertFalse(spans);self.assertEqual(routes['template'],'reference_document')

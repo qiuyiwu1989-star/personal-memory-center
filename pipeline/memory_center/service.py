@@ -59,14 +59,8 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
     @mcp.tool()
     def memory_search(query:str, ctx:Context, scope:str='personal', max_chars:int=6000)->dict:
         """Search scoped active memories, bounded by max_chars (500–16000)."""
-        if not 500<=max_chars<=16000:raise ValueError('max_chars must be 500–16000')
-        result=store.snapshot(principal(ctx),scope,query);items=[];used=0
-        for row in result['records']:
-            item={k:row[k] for k in ('id','statement','subject','status','source_id','message_id','source_date','revision','governance')}
-            size=len(encoded(item))
-            if used+size>max_chars:continue
-            items.append(item);used+=size
-        return {'records':items,'total':result['total'],'truncated':len(items)<result['total']}
+        from .reading import search_page
+        return search_page(store.snapshot(principal(ctx),scope,query),max_chars)
 
     @mcp.tool()
     def memory_context(query:str, ctx:Context, scope:str='personal', max_chars:int=1600)->dict:

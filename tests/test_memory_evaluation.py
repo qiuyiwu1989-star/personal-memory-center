@@ -76,7 +76,10 @@ class SuiteGateTest(unittest.TestCase):
         from pipeline.memory_center.evaluation import suite_gate
         run={'sample_index':1,'version':'v','max_output_tokens':1024,'validation':'passed',
              'review':dict.fromkeys(['semantic_support','speaker_attribution','time_handling','scope_handling','durable_value'],'pass')}
-        result=suite_gate([1],[run],'v',1024)
+        contract={'sample_index':1,'required_facts':[],'forbidden_facts':[]}
+        run['claims']=[]
+        run['review']['acceptance']={key:{'verdict':'pass','reason':'Synthetic empty negative case reviewed'} for key in ('no_unexpected_claims','no_duplicate_claims')}
+        result=suite_gate([1],[run],'v',1024,[contract])
         self.assertTrue(result['ready_for_owner_quality_decision'])
         self.assertFalse(result['quality_approved']);self.assertFalse(result['production_dispatch_enabled'])
         run['review']['time_handling']='fail'
