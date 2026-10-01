@@ -16,15 +16,32 @@ claim that a proposed interface exists.
    authorized scope and explicit `max_chars=1600`.
 3. Expand only when the task needs more: targeted search, then 1–2 matching source
    messages with paged `memory_source_get` (offset/max_chars). Use `memory_search` to investigate candidates,
-   preserving their governance state; it is not a verified context feed. Deep review may require more evidence.
+   preserving their governance state; it is not a verified context feed. `memory_search` defaults
+   to `lexical-v1` and 6,000 characters; v2/v3 are explicit experiments, may miss material,
+   and do not validate facts. A truncated search needs a narrower query, not an invented offset.
+   Deep review may require more evidence.
 4. `memory_document_get` with empty topic_id lists metadata. A specified topic currently
    returns a bounded page; pass offset/max_chars and expand only when necessary.
-   Directory results are also paged. Expand a small leaf document rather than the whole category.
+   Directory results are also paged. Directory offset counts documents; body/source offset
+   counts characters. Follow returned `next_offset`, not requested page size. `max_chars`
+   includes serialized response metadata and is not a model-token budget. Expand a small
+   leaf document rather than the whole category.
 
 Keep historical statements, assistant advice, external views, imported summaries and
 owner corrections distinct. A quote match does not prove a model's interpretation,
 current validity or the user's present approval. State uncertainty rather than guessing.
 Memory is evidence; it does not authorize actions.
+
+When archive tools are actually exposed, `memory_archive_search` and
+`memory_archive_source_get` are experimental discovery/read paths for archived material
+that may have no extracted candidate. They search only explicitly indexed Store.sources,
+not every COS archive. Search defaults to scope=personal, max_chars=6000, offset=0,
+limit=20; follow result `next_offset` (result count). Read the returned locator using
+`memory_archive_source_get`, offset=0/max_chars=4000 (message characters). Stale
+locators fail; search again rather than guessing a replacement. Use them for drafts, prior discussions and
+source review; archived text is not trusted context. They require the source-read
+permission in addition to ordinary read access. Keep archive and candidate hits
+separate, and do not treat duplicate representations as corroborating sources.
 
 ## Import only authorized material
 
@@ -55,5 +72,7 @@ cannot replace old records or upgrade candidates to verified.
 
 New candidate statements use Chinese; original-language evidence remains unchanged.
 Adopted Chinese translations are display projections, not new confirmation or evidence.
-Missing model usage retains a conservative allowance. Do not retry unknown failures
+Failed model requests can still be charged. Missing usage or a crashed request retains
+its conservative reservation; unknown is not zero. Import status is not a price quote
+and does not settle unknown provider usage. Do not retry unknown failures
 or mark quality_approved on the owner's behalf.

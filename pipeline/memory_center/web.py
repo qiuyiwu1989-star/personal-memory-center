@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 import threading
-from flask import Blueprint, Flask, g, jsonify, request, send_file
+from flask import Blueprint, Flask, Response, g, jsonify, request, send_file
 from werkzeug.exceptions import HTTPException
 from .core import Store, Invalid, Conflict, permit, encoded
 from .model import Model, PROMPT_VERSION
@@ -78,6 +78,39 @@ def blueprint(store, grants, model, browser_principal=None):
     @bp.post('/sources')
     def ingest():
         return jsonify(store.ingest(g.memory_principal, body())), 202
+
+    @bp.get('/archive-search')
+    def archive_source_search():
+        from .source_discovery import search
+        result=search(store,g.memory_principal,request.args.get('scope','personal'),request.args.get('q',''),
+                      request.args.get('max_chars',6000,type=int),request.args.get('offset',0,type=int),request.args.get('limit',20,type=int))
+        return Response(encoded(result),mimetype='application/json')
+
+    @bp.post('/archive-source')
+    def archive_source_read():
+        from .source_discovery import read
+        data=body()
+        result=read(store,g.memory_principal,data.get('scope','personal'),data.get('locator'),data.get('offset',0),data.get('max_chars',4000))
+        return Response(encoded(result),mimetype='application/json')
+
+    @bp.post('/archive-index')
+    def archive_index_rebuild():
+        from .source_discovery import rebuild
+        data=body()
+        return jsonify(rebuild(store,g.memory_principal,data.get('scope','personal'),data.get('force',False)))
+
+    @bp.get('/evidence-bundle')
+    def task_evidence_bundle():
+        from .evidence_bundle import bundle
+        result=bundle(store,g.memory_principal,request.args.get('scope','personal'),request.args.get('q',''),
+                      request.args.get('max_chars',6000,type=int),request.args.get('retrieval_mode','lexical-v1'))
+        return Response(encoded(result),mimetype='application/json')
+
+    @bp.get('/sources/<source_id>/dependencies')
+    def source_dependencies(source_id):
+        from .dependency_audit import preview
+        result=preview(store,g.memory_principal,request.args.get('scope','personal'),source_id,request.args.get('max_chars',6000,type=int))
+        return Response(encoded(result),mimetype='application/json')
 
     @bp.get('/entities')
     def entity_list():

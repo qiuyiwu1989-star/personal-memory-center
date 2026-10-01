@@ -12,6 +12,7 @@ from starlette.middleware.wsgi import WSGIMiddleware
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from mcp.server.fastmcp import FastMCP, Context
+from mcp.types import CallToolResult, TextContent
 from mcp.server.transport_security import TransportSecuritySettings
 from .core import Store, Invalid, permit, encoded
 from .documents import build_documents
@@ -101,6 +102,20 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
                 from .reading import source_page
                 return source_page(row['source_key'],message,offset,max_chars)
         raise ValueError('Message not found')
+
+    @mcp.tool()
+    def memory_archive_search(query:str,ctx:Context,scope:str='personal',max_chars:int=6000,offset:int=0,limit:int=20)->dict:
+        """Search explicitly indexed Store.sources only, not the complete COS archive. Requires read+source_read; bounded evidence, no LLM or implicit rebuild."""
+        from .source_discovery import search
+        result=search(store,principal(ctx),scope,query,max_chars,offset,limit)
+        return CallToolResult(content=[TextContent(type='text',text=encoded(result))],structuredContent=result)
+
+    @mcp.tool()
+    def memory_archive_source_get(locator:dict,ctx:Context,scope:str='personal',offset:int=0,max_chars:int=4000)->dict:
+        """Expand one version-bound visible source locator. Requires read+source_read. Evidence is not trusted context; no model call or write."""
+        from .source_discovery import read
+        result=read(store,principal(ctx),scope,locator,offset,max_chars)
+        return CallToolResult(content=[TextContent(type='text',text=encoded(result))],structuredContent=result)
 
     @mcp.tool()
     def memory_import(source_key:str,messages:list[dict],ctx:Context,scope:str='personal',source_type:str='document',processing_policy:str='archive',source_metadata:dict|None=None)->dict:

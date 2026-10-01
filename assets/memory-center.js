@@ -190,6 +190,7 @@
       $('model-state').textContent=identity.model_configured?'模型已配置':'模型未配置';
       $('method-version').textContent='v'+identity.method_version;
       $('ingest-form').hidden=!identity.actions.includes('write');
+      $('evidence-index').hidden=!identity.actions.includes('write') || !identity.actions.includes('source_read');
       notice('');
       $('archive-tab').hidden=!identity.scopes.includes('claude:archive');
       if(identity.scopes.includes('claude:archive')) await refreshArchives();
@@ -325,9 +326,38 @@
   $('reader-close').addEventListener('click',()=>$('document-reader').close());
   $('search-form').addEventListener('submit',e=>{e.preventDefault();refresh();});['scope','history'].forEach(id=>$(id).addEventListener('change',refresh));$('refresh').addEventListener('click',refresh);
   $('document-search-form').addEventListener('submit',async e=>{e.preventDefault();try{await refreshDocuments();}catch(err){notice(err.message,true);}});
+  let evidenceNext=null, evidenceQuery='', evidenceScope='';
+  async function searchEvidence(append=false){
+    const scope=$('scope').value, query=$('evidence-query').value;
+    const offset=append?evidenceNext:0;
+    if(append && (scope!==evidenceScope || query!==evidenceQuery || offset===null))return;
+    const data=await api('/archive-search?'+new URLSearchParams({scope,q:query,offset,max_chars:16000}));
+    if(scope!==$('scope').value || query!==$('evidence-query').value)return;
+    evidenceScope=scope;evidenceQuery=query;evidenceNext=data.next_offset;
+    if(!append)$('evidence-list').replaceChildren();
+    $('evidence-summary').textContent=data.total+' 个匹配片段 · 仅已建索引的资料 · 不使用模型 tokens';
+    $('evidence-more').hidden=evidenceNext===null;
+    for(const result of data.results){
+      const card=node('article',undefined,'record topic-tile');
+      card.append(node('span',result.role==='user'?'用户原话':result.role==='assistant'?'助手发言':'外部材料','tag'),node('h3',result.source_title||result.source_key),node('p',result.source_date||'来源时间未知','muted'),node('p',result.snippet,'tile-excerpt'));
+      const read=node('button','展开出处','primary');read.addEventListener('click',async()=>{
+        try{const page=await api('/archive-source',{scope,locator:result.locator,max_chars:8000});
+          openDocument((result.source_title||'原文')+' · '+result.role,page.text);
+          const more=node('button','继续阅读');more.hidden=page.next_offset===null;let next=page.next_offset;
+          more.addEventListener('click',async()=>{try{const part=await api('/archive-source',{scope,locator:result.locator,offset:next,max_chars:8000});$('reader-body').append(node('pre',part.text));next=part.next_offset;more.hidden=next===null;}catch(err){notice(err.message,true);}});
+          $('reader-body').append(more);
+        }catch(err){notice(err.message,true);}
+      });card.append(read);
+      const dependencies=node('button','关联内容');dependencies.addEventListener('click',async()=>{try{const impact=await api('/sources/'+encodeURIComponent(result.source_id)+'/dependencies?'+new URLSearchParams({scope,max_chars:10000}));openDocument('资料关联预览 · 不执行删除',JSON.stringify(impact,null,2));}catch(err){notice(err.message,true);}});card.append(dependencies);$('evidence-list').append(card);
+    }
+  }
+  $('evidence-form').addEventListener('submit',e=>{e.preventDefault();searchEvidence().catch(err=>notice(err.message,true));});
+  $('evidence-more').addEventListener('click',()=>searchEvidence(true).catch(err=>notice(err.message,true)));
+  $('evidence-index').addEventListener('click',async()=>{const button=$('evidence-index');button.disabled=true;try{const result=await api('/archive-index',{scope:$('scope').value});notice('索引更新完成：'+result.indexed_sources+' 份更新，'+result.unchanged_sources+' 份未变；没有调用模型。');await searchEvidence();}catch(err){notice(err.message,true);}finally{button.disabled=false;}});
+  $('scope').addEventListener('change',()=>{$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;evidenceNext=null;});
   function showView() {
     const requested=location.hash.slice(1);
-    const view=['documents','records','ingest','jobs','archives'].includes(requested)?requested:'documents';
+    const view=['documents','records','ingest','jobs','archives','evidence'].includes(requested)?requested:'documents';
     document.querySelectorAll('[data-panel]').forEach(el=>{el.hidden=el.dataset.panel!==view;});
     document.querySelectorAll('[data-view]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset.view===view)));
   }

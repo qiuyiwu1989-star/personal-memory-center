@@ -1,14 +1,80 @@
-"""Synthetic regression for wish versus decision; no semantic certification."""
+"""Independent synthetic modality fixtures; no real model or personal data."""
 import unittest
-from pipeline.memory_center.core import validate_plan,Invalid,encoded
+from pipeline.memory_center.core import Invalid
+from pipeline.memory_center.extraction_input import prepare_request, resolve_plan
+from pipeline.memory_center.modality import evidence_ranges, modality_problem
+
 
 class ModalityTest(unittest.TestCase):
-    def check(self,quote,statement):
-        source={'source_type':'conversation','trusted_user':False,'processing_method_version':'2026-10-01.13','payload':encoded([{'id':'synthetic','role':'user','text':quote}])}
-        return validate_plan({'claims':[{'topic':'projects','kind':'plan','subject':'synthetic','quote':quote,'statement':statement,'message_id':'synthetic'}]},source)
-    def test_wish_cannot_be_declared_a_decision(self):
-        for phrase in ('用户决定','用户已决定','用户已经决定'):
-            with self.assertRaises(Invalid):self.check('我希望采用合成方案。',phrase+'采用合成方案。')
-    def test_wish_and_explicit_decision_are_not_rewritten(self):
-        self.assertEqual(self.check('我希望采用合成方案。','用户希望采用合成方案。')[0]['status'],'source_reported')
-        self.assertEqual(self.check('我决定采用合成方案。','用户决定采用合成方案。')[0]['statement'],'用户决定采用合成方案。')
+    def prepare(self, text, version='2026-10-01.14'):
+        return prepare_request('conversation', [{'id': 'synthetic-message', 'role': 'user',
+            'text': text, 'source_title': 'Synthetic / 项目 A', 'created_at': '2026-02-03'}], version=version)
+
+    def claim(self, sid, statement, kind='claim'):
+        return {'topic': 'projects', 'kind': kind, 'subject': 'user',
+                'statement': statement, 'evidence_id': sid}
+
+    def test_named_fact_and_wish_separate_with_lossless_offsets(self):
+        text='我的合成项目名叫 Atlas，我希望下一阶段增加离线查询。'
+        request, spans, _ = self.prepare(text)
+        self.assertEqual(len(spans), 2)
+        self.assertEqual(''.join(s['quote'] for s in spans.values()), text)
+        for span in spans.values():
+            self.assertEqual(text[span['start']:span['end']], span['quote'])
+        ids=list(spans)
+        result=resolve_plan({'claims':[
+            self.claim(ids[0], '用户的合成项目名叫 Atlas。'),
+            self.claim(ids[1], '用户希望下一阶段增加离线查询。', 'plan'),
+        ]}, spans, version='2026-10-01.14')
+        self.assertEqual([c['modality'] for c in result['claims']], ['stated', 'wish'])
+        for claim in result['claims']:
+            self.assertIn('来源对话：Synthetic / 项目 A。', claim['statement'])
+            self.assertIn('来源消息日期：2026-02-03（非事件成立时间，当前有效性待核实）。', claim['statement'])
+
+    def test_wish_promotion_rejected_without_erasing_named_fact(self):
+        text='我的合成项目名叫 Atlas，我希望下一阶段增加离线查询。'
+        _, spans, _=self.prepare(text)
+        fact, wish=list(spans)
+        resolve_plan({'claims':[self.claim(fact,'用户的合成项目名叫 Atlas。')]}, spans, version='2026-10-01.14')
+        for statement,kind in [('用户已经完成离线查询。','claim'),('用户决定支持离线查询。','decision'),('用户支持离线查询。','event')]:
+            with self.subTest(statement=statement), self.assertRaises(Invalid):
+                resolve_plan({'claims':[self.claim(wish,statement,kind)]},spans,version='2026-10-01.14')
+
+    def test_list_condition_and_inherited_subject_keep_context(self):
+        examples=[
+            '我的合成系统包含：\n1. Atlas 查询器\n2. Orion 归档器。\n我希望以后增加导出。',
+            '如果独立评测通过，我计划发布 Atlas；我希望它保留证据。',
+            '我的合成系统叫 Atlas。它只允许离线查询。',
+            '我的合成系统叫“Atlas；我希望”。我计划增加查询。',
+        ]
+        for text in examples[:3]:
+            with self.subTest(text=text):
+                self.assertEqual(evidence_ranges(text),[(0,len(text))])
+        ranges=evidence_ranges(examples[3])
+        self.assertEqual(len(ranges),2)
+        self.assertEqual(examples[3][slice(*ranges[0])],'我的合成系统叫“Atlas；我希望”。')
+
+    def test_mixed_fact_and_condition_do_not_globally_reject_naming(self):
+        self.assertIsNone(modality_problem('我的项目叫 Atlas；希望未来离线。','用户的项目叫 Atlas。','claim'))
+        conditional='如果评测通过，我计划发布 Atlas。'
+        self.assertIsNone(modality_problem(conditional,'用户计划在评测通过的情况下发布 Atlas。','plan'))
+        self.assertIsNotNone(modality_problem(conditional,'用户已经完成发布 Atlas。','event'))
+        self.assertIsNone(modality_problem('用户已决定采用 Atlas。','用户已决定采用 Atlas。','decision'))
+
+    def test_negated_intention_and_legacy_metadata_compatibility(self):
+        self.assertIsNotNone(modality_problem('我不希望增加自动发布。','用户希望增加自动发布。','plan'))
+        self.assertIsNone(modality_problem('我不希望增加自动发布。','用户不希望增加自动发布。','plan'))
+        _,spans,_=self.prepare('我希望采用 Atlas。',version='2026-10-01.13')
+        result=resolve_plan({'claims':[self.claim(next(iter(spans)),'用户希望采用 Atlas。','plan')]},spans,version='2026-10-01.13')
+        self.assertIn('来源对话：Synthetic / 项目 A。',result['claims'][0]['statement'])
+        self.assertIn('来源消息日期：2026-02-03',result['claims'][0]['statement'])
+        self.assertNotIn('modality',result['claims'][0])
+
+    def test_model_supplied_modality_is_overridden_by_evidence(self):
+        _,spans,_=self.prepare('我希望采用 Atlas。')
+        claim=self.claim(next(iter(spans)),'用户希望采用 Atlas。','plan') | {'modality':'verified'}
+        result=resolve_plan({'claims':[claim]},spans,version='2026-10-01.14')
+        self.assertEqual(result['claims'][0]['modality'],'wish')
+
+
+if __name__=='__main__':unittest.main()

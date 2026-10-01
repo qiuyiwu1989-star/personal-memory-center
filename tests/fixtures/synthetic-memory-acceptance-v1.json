@@ -1,0 +1,837 @@
+{
+  "annotation_status": "synthetic_fixture",
+  "description": "All names/messages are synthetic; frame validation only, no quality claim.",
+  "corpus": {
+    "archive": [
+      "synthetic-source-0-decision",
+      "synthetic-source-0-draft",
+      "synthetic-source-1-decision",
+      "synthetic-source-1-draft",
+      "synthetic-source-2-decision",
+      "synthetic-source-2-draft",
+      "synthetic-source-3-decision",
+      "synthetic-source-3-draft",
+      "synthetic-source-4-decision",
+      "synthetic-source-4-draft",
+      "synthetic-source-5-decision",
+      "synthetic-source-5-draft",
+      "synthetic-source-6-decision",
+      "synthetic-source-6-draft",
+      "synthetic-source-7-decision",
+      "synthetic-source-7-draft",
+      "synthetic-source-8-decision",
+      "synthetic-source-8-draft",
+      "synthetic-source-9-decision",
+      "synthetic-source-9-draft"
+    ],
+    "candidate": [
+      "synthetic-candidate-0",
+      "synthetic-candidate-1",
+      "synthetic-candidate-2",
+      "synthetic-candidate-3",
+      "synthetic-candidate-4",
+      "synthetic-candidate-5",
+      "synthetic-candidate-6",
+      "synthetic-candidate-7",
+      "synthetic-candidate-8",
+      "synthetic-candidate-9"
+    ],
+    "combined": [
+      "synthetic-source-0-decision",
+      "synthetic-source-0-draft",
+      "synthetic-source-1-decision",
+      "synthetic-source-1-draft",
+      "synthetic-source-2-decision",
+      "synthetic-source-2-draft",
+      "synthetic-source-3-decision",
+      "synthetic-source-3-draft",
+      "synthetic-source-4-decision",
+      "synthetic-source-4-draft",
+      "synthetic-source-5-decision",
+      "synthetic-source-5-draft",
+      "synthetic-source-6-decision",
+      "synthetic-source-6-draft",
+      "synthetic-source-7-decision",
+      "synthetic-source-7-draft",
+      "synthetic-source-8-decision",
+      "synthetic-source-8-draft",
+      "synthetic-source-9-decision",
+      "synthetic-source-9-draft",
+      "synthetic-candidate-0",
+      "synthetic-candidate-1",
+      "synthetic-candidate-2",
+      "synthetic-candidate-3",
+      "synthetic-candidate-4",
+      "synthetic-candidate-5",
+      "synthetic-candidate-6",
+      "synthetic-candidate-7",
+      "synthetic-candidate-8",
+      "synthetic-candidate-9"
+    ]
+  },
+  "sources": [
+    {
+      "conversation_id": "synthetic-conversation-0",
+      "split": "development",
+      "messages": [
+        {
+          "id": "synthetic-source-0-decision",
+          "role": "user",
+          "text": "在合成项目0的2025年讨论中，我选择方案甲。"
+        },
+        {
+          "id": "synthetic-source-0-draft",
+          "role": "assistant",
+          "text": "合成项目0备选草稿提出方案乙，未经用户确认。"
+        }
+      ],
+      "candidate": {
+        "id": "synthetic-candidate-0",
+        "source_message_id": "synthetic-source-0-decision",
+        "statement": "合成项目0曾选择方案甲。",
+        "status": "source_reported",
+        "governance": "candidate"
+      }
+    },
+    {
+      "conversation_id": "synthetic-conversation-1",
+      "split": "development",
+      "messages": [
+        {
+          "id": "synthetic-source-1-decision",
+          "role": "user",
+          "text": "在合成项目1的2025年讨论中，我选择方案甲。"
+        },
+        {
+          "id": "synthetic-source-1-draft",
+          "role": "assistant",
+          "text": "合成项目1备选草稿提出方案乙，未经用户确认。"
+        }
+      ],
+      "candidate": {
+        "id": "synthetic-candidate-1",
+        "source_message_id": "synthetic-source-1-decision",
+        "statement": "合成项目1曾选择方案甲。",
+        "status": "source_reported",
+        "governance": "candidate"
+      }
+    },
+    {
+      "conversation_id": "synthetic-conversation-2",
+      "split": "development",
+      "messages": [
+        {
+          "id": "synthetic-source-2-decision",
+          "role": "user",
+          "text": "在合成项目2的2025年讨论中，我选择方案甲。"
+        },
+        {
+          "id": "synthetic-source-2-draft",
+          "role": "assistant",
+          "text": "合成项目2备选草稿提出方案乙，未经用户确认。"
+        }
+      ],
+      "candidate": {
+        "id": "synthetic-candidate-2",
+        "source_message_id": "synthetic-source-2-decision",
+        "statement": "合成项目2曾选择方案甲。",
+        "status": "source_reported",
+        "governance": "candidate"
+      }
+    },
+    {
+      "conversation_id": "synthetic-conversation-3",
+      "split": "development",
+      "messages": [
+        {
+          "id": "synthetic-source-3-decision",
+          "role": "user",
+          "text": "在合成项目3的2025年讨论中，我选择方案甲。"
+        },
+        {
+          "id": "synthetic-source-3-draft",
+          "role": "assistant",
+          "text": "合成项目3备选草稿提出方案乙，未经用户确认。"
+        }
+      ],
+      "candidate": {
+        "id": "synthetic-candidate-3",
+        "source_message_id": "synthetic-source-3-decision",
+        "statement": "合成项目3曾选择方案甲。",
+        "status": "source_reported",
+        "governance": "candidate"
+      }
+    },
+    {
+      "conversation_id": "synthetic-conversation-4",
+      "split": "test",
+      "messages": [
+        {
+          "id": "synthetic-source-4-decision",
+          "role": "user",
+          "text": "在合成项目4的2025年讨论中，我选择方案甲。"
+        },
+        {
+          "id": "synthetic-source-4-draft",
+          "role": "assistant",
+          "text": "合成项目4备选草稿提出方案乙，未经用户确认。"
+        }
+      ],
+      "candidate": {
+        "id": "synthetic-candidate-4",
+        "source_message_id": "synthetic-source-4-decision",
+        "statement": "合成项目4曾选择方案甲。",
+        "status": "source_reported",
+        "governance": "candidate"
+      }
+    },
+    {
+      "conversation_id": "synthetic-conversation-5",
+      "split": "test",
+      "messages": [
+        {
+          "id": "synthetic-source-5-decision",
+          "role": "user",
+          "text": "在合成项目5的2025年讨论中，我选择方案甲。"
+        },
+        {
+          "id": "synthetic-source-5-draft",
+          "role": "assistant",
+          "text": "合成项目5备选草稿提出方案乙，未经用户确认。"
+        }
+      ],
+      "candidate": {
+        "id": "synthetic-candidate-5",
+        "source_message_id": "synthetic-source-5-decision",
+        "statement": "合成项目5曾选择方案甲。",
+        "status": "source_reported",
+        "governance": "candidate"
+      }
+    },
+    {
+      "conversation_id": "synthetic-conversation-6",
+      "split": "test",
+      "messages": [
+        {
+          "id": "synthetic-source-6-decision",
+          "role": "user",
+          "text": "在合成项目6的2025年讨论中，我选择方案甲。"
+        },
+        {
+          "id": "synthetic-source-6-draft",
+          "role": "assistant",
+          "text": "合成项目6备选草稿提出方案乙，未经用户确认。"
+        }
+      ],
+      "candidate": {
+        "id": "synthetic-candidate-6",
+        "source_message_id": "synthetic-source-6-decision",
+        "statement": "合成项目6曾选择方案甲。",
+        "status": "source_reported",
+        "governance": "candidate"
+      }
+    },
+    {
+      "conversation_id": "synthetic-conversation-7",
+      "split": "test",
+      "messages": [
+        {
+          "id": "synthetic-source-7-decision",
+          "role": "user",
+          "text": "在合成项目7的2025年讨论中，我选择方案甲。"
+        },
+        {
+          "id": "synthetic-source-7-draft",
+          "role": "assistant",
+          "text": "合成项目7备选草稿提出方案乙，未经用户确认。"
+        }
+      ],
+      "candidate": {
+        "id": "synthetic-candidate-7",
+        "source_message_id": "synthetic-source-7-decision",
+        "statement": "合成项目7曾选择方案甲。",
+        "status": "source_reported",
+        "governance": "candidate"
+      }
+    },
+    {
+      "conversation_id": "synthetic-conversation-8",
+      "split": "test",
+      "messages": [
+        {
+          "id": "synthetic-source-8-decision",
+          "role": "user",
+          "text": "在合成项目8的2025年讨论中，我选择方案甲。"
+        },
+        {
+          "id": "synthetic-source-8-draft",
+          "role": "assistant",
+          "text": "合成项目8备选草稿提出方案乙，未经用户确认。"
+        }
+      ],
+      "candidate": {
+        "id": "synthetic-candidate-8",
+        "source_message_id": "synthetic-source-8-decision",
+        "statement": "合成项目8曾选择方案甲。",
+        "status": "source_reported",
+        "governance": "candidate"
+      }
+    },
+    {
+      "conversation_id": "synthetic-conversation-9",
+      "split": "test",
+      "messages": [
+        {
+          "id": "synthetic-source-9-decision",
+          "role": "user",
+          "text": "在合成项目9的2025年讨论中，我选择方案甲。"
+        },
+        {
+          "id": "synthetic-source-9-draft",
+          "role": "assistant",
+          "text": "合成项目9备选草稿提出方案乙，未经用户确认。"
+        }
+      ],
+      "candidate": {
+        "id": "synthetic-candidate-9",
+        "source_message_id": "synthetic-source-9-decision",
+        "statement": "合成项目9曾选择方案甲。",
+        "status": "source_reported",
+        "governance": "candidate"
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "task_id": "synthetic-conversation-0-task-0",
+      "conversation_id": "synthetic-conversation-0",
+      "split": "development",
+      "query": "合成项目0在2025年讨论中选择什么方案",
+      "targets": {
+        "archive": [
+          "synthetic-source-0-decision"
+        ],
+        "candidate": [
+          "synthetic-candidate-0"
+        ],
+        "combined": [
+          "synthetic-source-0-decision",
+          "synthetic-candidate-0"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "只描述历史选择并引用用户消息，不声称现在有效",
+      "boundary": "historical_decision"
+    },
+    {
+      "task_id": "synthetic-conversation-0-task-1",
+      "conversation_id": "synthetic-conversation-0",
+      "split": "development",
+      "query": "合成项目0助手备选草稿提议什么",
+      "targets": {
+        "archive": [
+          "synthetic-source-0-draft"
+        ],
+        "candidate": [],
+        "combined": [
+          "synthetic-source-0-draft"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "说明为助手草稿，不能升格成用户决定",
+      "boundary": "assistant_attribution"
+    },
+    {
+      "task_id": "synthetic-conversation-0-task-2",
+      "conversation_id": "synthetic-conversation-0",
+      "split": "development",
+      "query": "合成项目0现在仍执行原方案吗",
+      "targets": {
+        "archive": [],
+        "candidate": [],
+        "combined": []
+      },
+      "expected_abstention": true,
+      "answer_rubric": "证据不含现在状态；说明无法确定，可回查历史而不作当前承诺",
+      "boundary": "unknown_current_state"
+    },
+    {
+      "task_id": "synthetic-conversation-1-task-0",
+      "conversation_id": "synthetic-conversation-1",
+      "split": "development",
+      "query": "合成项目1在2025年讨论中选择什么方案",
+      "targets": {
+        "archive": [
+          "synthetic-source-1-decision"
+        ],
+        "candidate": [
+          "synthetic-candidate-1"
+        ],
+        "combined": [
+          "synthetic-source-1-decision",
+          "synthetic-candidate-1"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "只描述历史选择并引用用户消息，不声称现在有效",
+      "boundary": "historical_decision"
+    },
+    {
+      "task_id": "synthetic-conversation-1-task-1",
+      "conversation_id": "synthetic-conversation-1",
+      "split": "development",
+      "query": "合成项目1助手备选草稿提议什么",
+      "targets": {
+        "archive": [
+          "synthetic-source-1-draft"
+        ],
+        "candidate": [],
+        "combined": [
+          "synthetic-source-1-draft"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "说明为助手草稿，不能升格成用户决定",
+      "boundary": "assistant_attribution"
+    },
+    {
+      "task_id": "synthetic-conversation-1-task-2",
+      "conversation_id": "synthetic-conversation-1",
+      "split": "development",
+      "query": "合成项目1现在仍执行原方案吗",
+      "targets": {
+        "archive": [],
+        "candidate": [],
+        "combined": []
+      },
+      "expected_abstention": true,
+      "answer_rubric": "证据不含现在状态；说明无法确定，可回查历史而不作当前承诺",
+      "boundary": "unknown_current_state"
+    },
+    {
+      "task_id": "synthetic-conversation-2-task-0",
+      "conversation_id": "synthetic-conversation-2",
+      "split": "development",
+      "query": "合成项目2在2025年讨论中选择什么方案",
+      "targets": {
+        "archive": [
+          "synthetic-source-2-decision"
+        ],
+        "candidate": [
+          "synthetic-candidate-2"
+        ],
+        "combined": [
+          "synthetic-source-2-decision",
+          "synthetic-candidate-2"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "只描述历史选择并引用用户消息，不声称现在有效",
+      "boundary": "historical_decision"
+    },
+    {
+      "task_id": "synthetic-conversation-2-task-1",
+      "conversation_id": "synthetic-conversation-2",
+      "split": "development",
+      "query": "合成项目2助手备选草稿提议什么",
+      "targets": {
+        "archive": [
+          "synthetic-source-2-draft"
+        ],
+        "candidate": [],
+        "combined": [
+          "synthetic-source-2-draft"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "说明为助手草稿，不能升格成用户决定",
+      "boundary": "assistant_attribution"
+    },
+    {
+      "task_id": "synthetic-conversation-2-task-2",
+      "conversation_id": "synthetic-conversation-2",
+      "split": "development",
+      "query": "合成项目2现在仍执行原方案吗",
+      "targets": {
+        "archive": [],
+        "candidate": [],
+        "combined": []
+      },
+      "expected_abstention": true,
+      "answer_rubric": "证据不含现在状态；说明无法确定，可回查历史而不作当前承诺",
+      "boundary": "unknown_current_state"
+    },
+    {
+      "task_id": "synthetic-conversation-3-task-0",
+      "conversation_id": "synthetic-conversation-3",
+      "split": "development",
+      "query": "合成项目3在2025年讨论中选择什么方案",
+      "targets": {
+        "archive": [
+          "synthetic-source-3-decision"
+        ],
+        "candidate": [
+          "synthetic-candidate-3"
+        ],
+        "combined": [
+          "synthetic-source-3-decision",
+          "synthetic-candidate-3"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "只描述历史选择并引用用户消息，不声称现在有效",
+      "boundary": "historical_decision"
+    },
+    {
+      "task_id": "synthetic-conversation-3-task-1",
+      "conversation_id": "synthetic-conversation-3",
+      "split": "development",
+      "query": "合成项目3助手备选草稿提议什么",
+      "targets": {
+        "archive": [
+          "synthetic-source-3-draft"
+        ],
+        "candidate": [],
+        "combined": [
+          "synthetic-source-3-draft"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "说明为助手草稿，不能升格成用户决定",
+      "boundary": "assistant_attribution"
+    },
+    {
+      "task_id": "synthetic-conversation-3-task-2",
+      "conversation_id": "synthetic-conversation-3",
+      "split": "development",
+      "query": "合成项目3现在仍执行原方案吗",
+      "targets": {
+        "archive": [],
+        "candidate": [],
+        "combined": []
+      },
+      "expected_abstention": true,
+      "answer_rubric": "证据不含现在状态；说明无法确定，可回查历史而不作当前承诺",
+      "boundary": "unknown_current_state"
+    },
+    {
+      "task_id": "synthetic-conversation-4-task-0",
+      "conversation_id": "synthetic-conversation-4",
+      "split": "test",
+      "query": "合成项目4在2025年讨论中选择什么方案",
+      "targets": {
+        "archive": [
+          "synthetic-source-4-decision"
+        ],
+        "candidate": [
+          "synthetic-candidate-4"
+        ],
+        "combined": [
+          "synthetic-source-4-decision",
+          "synthetic-candidate-4"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "只描述历史选择并引用用户消息，不声称现在有效",
+      "boundary": "historical_decision"
+    },
+    {
+      "task_id": "synthetic-conversation-4-task-1",
+      "conversation_id": "synthetic-conversation-4",
+      "split": "test",
+      "query": "合成项目4助手备选草稿提议什么",
+      "targets": {
+        "archive": [
+          "synthetic-source-4-draft"
+        ],
+        "candidate": [],
+        "combined": [
+          "synthetic-source-4-draft"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "说明为助手草稿，不能升格成用户决定",
+      "boundary": "assistant_attribution"
+    },
+    {
+      "task_id": "synthetic-conversation-4-task-2",
+      "conversation_id": "synthetic-conversation-4",
+      "split": "test",
+      "query": "合成项目4现在仍执行原方案吗",
+      "targets": {
+        "archive": [],
+        "candidate": [],
+        "combined": []
+      },
+      "expected_abstention": true,
+      "answer_rubric": "证据不含现在状态；说明无法确定，可回查历史而不作当前承诺",
+      "boundary": "unknown_current_state"
+    },
+    {
+      "task_id": "synthetic-conversation-5-task-0",
+      "conversation_id": "synthetic-conversation-5",
+      "split": "test",
+      "query": "合成项目5在2025年讨论中选择什么方案",
+      "targets": {
+        "archive": [
+          "synthetic-source-5-decision"
+        ],
+        "candidate": [
+          "synthetic-candidate-5"
+        ],
+        "combined": [
+          "synthetic-source-5-decision",
+          "synthetic-candidate-5"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "只描述历史选择并引用用户消息，不声称现在有效",
+      "boundary": "historical_decision"
+    },
+    {
+      "task_id": "synthetic-conversation-5-task-1",
+      "conversation_id": "synthetic-conversation-5",
+      "split": "test",
+      "query": "合成项目5助手备选草稿提议什么",
+      "targets": {
+        "archive": [
+          "synthetic-source-5-draft"
+        ],
+        "candidate": [],
+        "combined": [
+          "synthetic-source-5-draft"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "说明为助手草稿，不能升格成用户决定",
+      "boundary": "assistant_attribution"
+    },
+    {
+      "task_id": "synthetic-conversation-5-task-2",
+      "conversation_id": "synthetic-conversation-5",
+      "split": "test",
+      "query": "合成项目5现在仍执行原方案吗",
+      "targets": {
+        "archive": [],
+        "candidate": [],
+        "combined": []
+      },
+      "expected_abstention": true,
+      "answer_rubric": "证据不含现在状态；说明无法确定，可回查历史而不作当前承诺",
+      "boundary": "unknown_current_state"
+    },
+    {
+      "task_id": "synthetic-conversation-6-task-0",
+      "conversation_id": "synthetic-conversation-6",
+      "split": "test",
+      "query": "合成项目6在2025年讨论中选择什么方案",
+      "targets": {
+        "archive": [
+          "synthetic-source-6-decision"
+        ],
+        "candidate": [
+          "synthetic-candidate-6"
+        ],
+        "combined": [
+          "synthetic-source-6-decision",
+          "synthetic-candidate-6"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "只描述历史选择并引用用户消息，不声称现在有效",
+      "boundary": "historical_decision"
+    },
+    {
+      "task_id": "synthetic-conversation-6-task-1",
+      "conversation_id": "synthetic-conversation-6",
+      "split": "test",
+      "query": "合成项目6助手备选草稿提议什么",
+      "targets": {
+        "archive": [
+          "synthetic-source-6-draft"
+        ],
+        "candidate": [],
+        "combined": [
+          "synthetic-source-6-draft"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "说明为助手草稿，不能升格成用户决定",
+      "boundary": "assistant_attribution"
+    },
+    {
+      "task_id": "synthetic-conversation-6-task-2",
+      "conversation_id": "synthetic-conversation-6",
+      "split": "test",
+      "query": "合成项目6现在仍执行原方案吗",
+      "targets": {
+        "archive": [],
+        "candidate": [],
+        "combined": []
+      },
+      "expected_abstention": true,
+      "answer_rubric": "证据不含现在状态；说明无法确定，可回查历史而不作当前承诺",
+      "boundary": "unknown_current_state"
+    },
+    {
+      "task_id": "synthetic-conversation-7-task-0",
+      "conversation_id": "synthetic-conversation-7",
+      "split": "test",
+      "query": "合成项目7在2025年讨论中选择什么方案",
+      "targets": {
+        "archive": [
+          "synthetic-source-7-decision"
+        ],
+        "candidate": [
+          "synthetic-candidate-7"
+        ],
+        "combined": [
+          "synthetic-source-7-decision",
+          "synthetic-candidate-7"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "只描述历史选择并引用用户消息，不声称现在有效",
+      "boundary": "historical_decision"
+    },
+    {
+      "task_id": "synthetic-conversation-7-task-1",
+      "conversation_id": "synthetic-conversation-7",
+      "split": "test",
+      "query": "合成项目7助手备选草稿提议什么",
+      "targets": {
+        "archive": [
+          "synthetic-source-7-draft"
+        ],
+        "candidate": [],
+        "combined": [
+          "synthetic-source-7-draft"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "说明为助手草稿，不能升格成用户决定",
+      "boundary": "assistant_attribution"
+    },
+    {
+      "task_id": "synthetic-conversation-7-task-2",
+      "conversation_id": "synthetic-conversation-7",
+      "split": "test",
+      "query": "合成项目7现在仍执行原方案吗",
+      "targets": {
+        "archive": [],
+        "candidate": [],
+        "combined": []
+      },
+      "expected_abstention": true,
+      "answer_rubric": "证据不含现在状态；说明无法确定，可回查历史而不作当前承诺",
+      "boundary": "unknown_current_state"
+    },
+    {
+      "task_id": "synthetic-conversation-8-task-0",
+      "conversation_id": "synthetic-conversation-8",
+      "split": "test",
+      "query": "合成项目8在2025年讨论中选择什么方案",
+      "targets": {
+        "archive": [
+          "synthetic-source-8-decision"
+        ],
+        "candidate": [
+          "synthetic-candidate-8"
+        ],
+        "combined": [
+          "synthetic-source-8-decision",
+          "synthetic-candidate-8"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "只描述历史选择并引用用户消息，不声称现在有效",
+      "boundary": "historical_decision"
+    },
+    {
+      "task_id": "synthetic-conversation-8-task-1",
+      "conversation_id": "synthetic-conversation-8",
+      "split": "test",
+      "query": "合成项目8助手备选草稿提议什么",
+      "targets": {
+        "archive": [
+          "synthetic-source-8-draft"
+        ],
+        "candidate": [],
+        "combined": [
+          "synthetic-source-8-draft"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "说明为助手草稿，不能升格成用户决定",
+      "boundary": "assistant_attribution"
+    },
+    {
+      "task_id": "synthetic-conversation-8-task-2",
+      "conversation_id": "synthetic-conversation-8",
+      "split": "test",
+      "query": "合成项目8现在仍执行原方案吗",
+      "targets": {
+        "archive": [],
+        "candidate": [],
+        "combined": []
+      },
+      "expected_abstention": true,
+      "answer_rubric": "证据不含现在状态；说明无法确定，可回查历史而不作当前承诺",
+      "boundary": "unknown_current_state"
+    },
+    {
+      "task_id": "synthetic-conversation-9-task-0",
+      "conversation_id": "synthetic-conversation-9",
+      "split": "test",
+      "query": "合成项目9在2025年讨论中选择什么方案",
+      "targets": {
+        "archive": [
+          "synthetic-source-9-decision"
+        ],
+        "candidate": [
+          "synthetic-candidate-9"
+        ],
+        "combined": [
+          "synthetic-source-9-decision",
+          "synthetic-candidate-9"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "只描述历史选择并引用用户消息，不声称现在有效",
+      "boundary": "historical_decision"
+    },
+    {
+      "task_id": "synthetic-conversation-9-task-1",
+      "conversation_id": "synthetic-conversation-9",
+      "split": "test",
+      "query": "合成项目9助手备选草稿提议什么",
+      "targets": {
+        "archive": [
+          "synthetic-source-9-draft"
+        ],
+        "candidate": [],
+        "combined": [
+          "synthetic-source-9-draft"
+        ]
+      },
+      "expected_abstention": false,
+      "answer_rubric": "说明为助手草稿，不能升格成用户决定",
+      "boundary": "assistant_attribution"
+    },
+    {
+      "task_id": "synthetic-conversation-9-task-2",
+      "conversation_id": "synthetic-conversation-9",
+      "split": "test",
+      "query": "合成项目9现在仍执行原方案吗",
+      "targets": {
+        "archive": [],
+        "candidate": [],
+        "combined": []
+      },
+      "expected_abstention": true,
+      "answer_rubric": "证据不含现在状态；说明无法确定，可回查历史而不作当前承诺",
+      "boundary": "unknown_current_state"
+    }
+  ],
+  "synthetic": true
+}
