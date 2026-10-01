@@ -147,7 +147,7 @@ def process_one(store,model):
             with store.db() as db:
                 db.execute('INSERT INTO extraction_previews VALUES(?,?,?,?,?,?)',(comparison['id'],source['id'],'zh-projection-v1',source['digest'],encoded(comparison),time.time()))
         else:
-            plan,usage=model.extract(json.loads(source['payload']))
+            plan,usage=model.extract_source(source) if hasattr(model,'extract_source') else model.extract(json.loads(source['payload']))
         p={'id':'memory-worker','owner':run['owner'],'scopes':[run['scope']],'actions':['read','write']}
         if operation['operation']!='translate': comparison=preview(store,p,source['id'],plan,run['method_version'])
         with store.db() as db:

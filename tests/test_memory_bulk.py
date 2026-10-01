@@ -196,6 +196,19 @@ class BulkTest(unittest.TestCase):
         with self.store.db() as db:
             self.assertEqual(db.execute('SELECT state FROM jobs WHERE id=?',(result['job_id'],)).fetchone()['state'],'paused_budget')
 
+    def test_legacy_plan_cannot_resume_or_spend_more_without_replanning(self):
+        batch=self.bulk.create(self.owner,BATCH,100000)
+        self.bulk.control(self.owner,batch['id'],'pause')
+        with self.store.db() as db:db.execute('DELETE FROM bulk_batch_parsers WHERE batch_id=?',(batch['id'],))
+        self.assertTrue(self.bulk.status(self.owner,batch['id'])['requires_replan'])
+        with self.assertRaisesRegex(ValueError,'重新规划'):
+            self.bulk.control(self.owner,batch['id'],'resume')
+        with self.assertRaisesRegex(ValueError,'重新规划'):
+            self.bulk.control(self.owner,batch['id'],'set_limit',200000)
+        self.bulk.tick()
+        self.assertEqual(self.bulk.status(self.owner,batch['id'])['counts'].get('queued',0),0)
+        self.assertEqual(self.bulk.status(self.owner,batch['id'])['tokens_spent'],0)
+
     def test_pause_stops_new_jobs(self):
         batch=self.bulk.create(self.owner,BATCH)
         self.bulk.control(self.owner,batch['id'],'pause')

@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from .core import Invalid, encoded, permit
 from .budget import scoped_spent
+from .claude import PARSER_VERSION
 
 SCOPE = os.environ.get('QIU_MEMORY_HISTORY_SCOPE','claude:history')
 RESERVE_TOKENS = 35000  # 24k source chars + 4k output tokens + prompt, rounded upward.
@@ -34,28 +35,15 @@ def setup(store):
           spent_tokens INTEGER NOT NULL DEFAULT 0,
           error TEXT, created REAL NOT NULL,
           UNIQUE(batch_id,conversation_id,segment_index));
+        CREATE TABLE IF NOT EXISTS bulk_batch_parsers(
+          batch_id TEXT PRIMARY KEY, parser_version TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS bulk_segments_order ON bulk_segments(batch_id,phase,state,created);
         ''')
 
 
 def _messages(conversation):
-    title = str(conversation.get('name') or '未命名对话')[:120]
-    for index, raw in enumerate(conversation.get('chat_messages') or []):
-        if not isinstance(raw, dict):
-            continue
-        body = raw.get('text')
-        if not isinstance(body, str) or not body.strip():
-            continue
-        role = {'human':'user', 'assistant':'assistant'}.get(raw.get('sender'), 'external')
-        original_id = str(raw.get('uuid') or ('message-'+str(index)))[:75]
-        date = str(raw.get('created_at') or '')[:80]
-        # Long messages remain addressable by original id plus an explicit part suffix.
-        for part, start in enumerate(range(0, len(body), 12000)):
-            text = body[start:start+12000]
-            if not text.strip():
-                continue
-            yield {'id':original_id+'#'+str(part), 'role':role, 'text':text,
-                   'source_title':title, 'created_at':date}
+    from .claude import messages
+    yield from messages(conversation)
 
 
 def _segments(conversation):
@@ -170,6 +158,7 @@ class Bulk:
             db.execute('INSERT INTO bulk_batches VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
                        (batch,principal['owner'],batch_id,SCOPE,'running',token_limit,0,len(rows),len(first_sample),
                         len(seen),no_text,memory_documents,time.time()))
+            db.execute('INSERT INTO bulk_batch_parsers VALUES(?,?)',(batch,PARSER_VERSION))
             for row in rows:
                 db.execute('INSERT INTO bulk_segments VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',row)
             # Six category documents replace thousands of per-segment files.
@@ -189,7 +178,10 @@ class Bulk:
             counts={r['state']:r['n'] for r in db.execute('SELECT state,count(*) AS n FROM bulk_segments WHERE batch_id=? GROUP BY state',(batch_id,))}
             samples=db.execute("SELECT count(*) AS n,coalesce(sum(spent_tokens),0) AS spent FROM bulk_segments WHERE batch_id=? AND phase='sample' AND state IN ('applied','failed')",(batch_id,)).fetchone()
             errors=[dict(r) for r in db.execute("SELECT conversation_id,segment_index,error FROM bulk_segments WHERE batch_id=? AND state='failed' ORDER BY created LIMIT 10",(batch_id,))]
-        b=dict(batch);b['counts']=counts;b['sample_done']=samples['n']
+        with self.store.db() as db:
+            parser=db.execute('SELECT parser_version FROM bulk_batch_parsers WHERE batch_id=?',(batch_id,)).fetchone()
+        b=dict(batch);b['parser_version']=parser['parser_version'] if parser else 'legacy-flat-text';b['requires_replan']=b['parser_version']!=PARSER_VERSION
+        b['counts']=counts;b['sample_done']=samples['n']
         b['estimated_total_tokens']=round(samples['spent']/samples['n']*batch['total_segments']) if samples['n'] else None
         b['recent_errors']=errors
         return b
@@ -209,6 +201,8 @@ class Bulk:
             raise PermissionError('仅本人可控制批次')
         if action not in ('pause','resume','retry_failed','set_limit'):
             raise Invalid('无效操作')
+        if action!='pause' and self.status(principal,batch_id)['requires_replan']:
+            raise Invalid('旧批次包含混合正文，需按可见内容重新规划；提高预算不会修正旧输入')
         if action=='set_limit':
             if type(token_limit) is not int or not 100000<=token_limit<=100000000:
                 raise Invalid('用量上限需在 100,000–100,000,000 tokens 之间')
@@ -255,6 +249,10 @@ class Bulk:
         with self.store.db() as db:
             batches=[dict(r) for r in db.execute("SELECT * FROM bulk_batches WHERE state IN ('running','paused','paused_budget','paused_error')")]
         for b in batches:
+            with self.store.db() as db:
+                parser=db.execute('SELECT parser_version FROM bulk_batch_parsers WHERE batch_id=?',(b['id'],)).fetchone()
+            if not parser or parser['parser_version']!=PARSER_VERSION:
+                continue
             with self.store.db() as db:
                 active=[dict(r) for r in db.execute("SELECT s.id,s.state,s.job_id,s.attempts_counted,s.reserved_attempts,s.reserved_tokens,"
                     "j.state job_state,j.attempts,j.usage,j.error,j.lease_until FROM bulk_segments s LEFT JOIN jobs j ON j.id=s.job_id "
@@ -310,7 +308,7 @@ class Bulk:
             with self.store.db() as db:
                 next_segment=db.execute("SELECT * FROM bulk_segments WHERE batch_id=? AND state='planned' ORDER BY CASE phase WHEN 'sample' THEN 0 WHEN 'summary' THEN 1 ELSE 2 END,created,id LIMIT 1",(b['id'],)).fetchone()
             principal={'id':'archive-batch','owner':b['owner'],'scopes':[b['scope']],'actions':['write'],'trusted_user':False}
-            result=self.store.ingest(principal,{'scope':b['scope'],'source_type':next_segment['source_type'],'source_key':next_segment['source_key'],'messages':json.loads(next_segment['payload'])})
+            result=self.store.ingest(principal,{'scope':b['scope'],'source_type':next_segment['source_type'],'source_key':next_segment['source_key'],'messages':json.loads(next_segment['payload']),'source_metadata':{'parser_version':PARSER_VERSION,'parent_source_key':b['source_batch']}})
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
                 current=db.execute('SELECT * FROM bulk_batches WHERE id=?',(b['id'],)).fetchone()

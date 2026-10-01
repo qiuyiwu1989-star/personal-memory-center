@@ -29,6 +29,7 @@
     $('bulk-metrics').replaceChildren(...[['planned','待入队'],['queued','处理中'],['applied','已完成'],['failed','失败']].map(([key,title])=>{const box=node('div',undefined,'job-metric');box.append(node('strong',String(count[key]||0)),node('span',title));return box;}));
     $('bulk-budget').textContent='已计量及在途预留 '+batch.tokens_spent.toLocaleString()+' / '+batch.token_limit.toLocaleString()+' tokens · 样本 '+batch.sample_done+'/'+batch.sampled_segments+' 个'+(batch.estimated_total_tokens?' · 全量预估约 '+batch.estimated_total_tokens.toLocaleString()+' tokens':'。预估会在样本完成后显示。')+'。未返回用量的失败任务按 35,000 tokens 预留。';
     $('bulk-errors').textContent=batch.recent_errors?.length?'最近失败：'+batch.recent_errors.map(x=>x.conversation_id.slice(0,8)+' / '+x.segment_index+' · '+(x.error||'未提供原因')).join('；'):'';
+    if(batch.requires_replan){$('bulk-errors').textContent='旧批次使用了混合正文解析。需按正式回复重新规划输入并通过样本评测；提高预算不会修正旧输入。原件和旧提炼结果均保留。';return;}
     const operate=(label,action)=>{const button=node('button',label,action==='resume'?'primary':undefined);button.addEventListener('click',async()=>{button.disabled=true;try{await api('/bulk/'+batch.id+'/control',{action});await refreshArchives();}catch(err){notice(err.message,true);button.disabled=false;}});actions.append(button);};
     if(batch.state==='running')operate('暂停新任务','pause');
     if(batch.state==='paused')operate('继续处理','resume');

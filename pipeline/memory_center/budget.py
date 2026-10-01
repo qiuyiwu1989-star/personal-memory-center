@@ -64,6 +64,22 @@ def status(store,principal,scope):
 def reserve(db,source,operation,reference_id):
     # UTF-8 byte count is a conservative input-token allowance, plus prompt/output.
     allowance=len(source['payload'].encode('utf-8'))+12000
+    return _reserve(db,source,operation,reference_id,allowance)
+
+
+def reserve_request(db,source,reference_id,system,max_output_tokens=2048):
+    """Bound a quality request with its complete system and input byte allowance.
+
+    Not exposed to clients. Output must use the exact same bounded max_tokens;
+    UTF-8 request bytes are a conservative input allowance, plus envelope slack.
+    """
+    if not isinstance(system,str) or type(max_output_tokens) is not int or not 1<=max_output_tokens<=4096:
+        raise Invalid('评测请求预留参数无效')
+    allowance=len(source['payload'].encode('utf-8'))+len(system.encode('utf-8'))+max_output_tokens+1024
+    return _reserve(db,source,'quality_evaluation',reference_id,allowance)
+
+
+def _reserve(db,source,operation,reference_id,allowance):
     row=db.execute('SELECT * FROM model_budgets WHERE owner=? AND scope=?',(source['owner'],source['scope'])).fetchone()
     if not row or row['tokens_spent']+allowance>row['token_limit']:return None
     legacy=db.execute('SELECT sum(tokens_spent) spent,sum(token_limit) cap FROM bulk_batches WHERE owner=? AND scope=?',(source['owner'],source['scope'])).fetchone()

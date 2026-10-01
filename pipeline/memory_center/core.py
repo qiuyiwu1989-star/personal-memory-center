@@ -168,6 +168,12 @@ class Store:
             if source['principal']=='archive-batch' and not external:
                 db.execute("UPDATE jobs SET state='paused_budget',error='等待历史批次分配预留' WHERE id=?",(job['id'],))
                 return True
+            if external and source['principal']=='archive-batch':
+                from .claude import PARSER_VERSION
+                metadata=db.execute('SELECT metadata FROM source_envelopes WHERE source_id=?',(source['id'],)).fetchone()
+                if not metadata or json.loads(metadata['metadata']).get('parser_version')!=PARSER_VERSION:
+                    db.execute("UPDATE jobs SET state='paused_budget',error='需按可见正文重新规划旧批次' WHERE id=?",(job['id'],))
+                    return True
             if external:
                 if external['reserved_attempts'] <= job['attempts'] or external['reserved_tokens'] <= 0:
                     return False
@@ -182,7 +188,7 @@ class Store:
             source = dict(db.execute('SELECT * FROM sources WHERE id=?', (job['source_id'],)).fetchone())
         usage = None
         try:
-            plan, usage = model.extract(json.loads(source['payload']))
+            plan, usage = model.extract_source(source) if hasattr(model,'extract_source') else model.extract(json.loads(source['payload']))
             try:
                 claims = validate_plan(plan, source)
             except Invalid:
@@ -199,6 +205,7 @@ class Store:
                         rejected += 1
                 if not claims:
                     raise
+                claims = validate_plan({'claims':claims},source)
                 usage = dict(usage or {}) | {'discarded_unsupported_claims':rejected}
             from .documents import setup
             setup(self)
@@ -382,7 +389,7 @@ def permit(principal, scope, action):
 
 
 def validate_plan(plan, source):
-    if not isinstance(plan, dict) or not isinstance(plan.get('claims'), list) or len(plan['claims']) > 30:
+    if not isinstance(plan, dict) or not isinstance(plan.get('claims'), list) or len(plan['claims']) > 12:
         raise Invalid('模型输出不符合 claims 协议')
     messages = {m['id']: m for m in json.loads(source['payload'])}
     claims = []
@@ -399,6 +406,10 @@ def validate_plan(plan, source):
         message = messages.get(c['message_id'])
         if not message or c['quote'] not in message['text']:
             raise Invalid('证据必须逐字匹配来源消息')
+        if c.get('topic')=='people' or c.get('kind')=='relationship':
+            for alias, romanized in re.findall(r'([\u4e00-\u9fff]{2,8})[（(]([A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+)+)[）)]',c['statement']):
+                if romanized in message['text'] and alias not in message['text']:
+                    raise Invalid('不能为来源中的拼音姓名猜测中文名，请保留原名')
         acknowledgement=message['text'].strip().casefold().strip('。.!！')
         if acknowledgement in ('继续','好的','好','是的','yes','ok','continue') and c['statement'].strip().casefold().strip('。.!！')!=acknowledgement:
             raise Invalid('简短确认消息不能独立支持扩展记忆，请引用完整依据')
@@ -411,4 +422,6 @@ def validate_plan(plan, source):
         elif message['role'] == 'user' and source['trusted_user']:
             status = 'user_stated'
         claims.append(c | {'status': status})
+    if sum(c['status']=='agent_suggested' for c in claims)>2:
+        raise Invalid('单批最多保留两条必要的助手建议')
     return claims
