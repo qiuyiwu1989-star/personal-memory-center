@@ -21,4 +21,11 @@ def evidence_context(message,source_type):
 def contains_immediate_command(statement):
     # Narrow imperative patterns; historical reports such as “开始了第六讲” do
     # not match. A rejected mixed claim can be resubmitted without the command.
-    return bool(re.search(r'(?:开始|继续)(?:写|生成|输出|编写|撰写)|开始第[一二三四五六七八九十百\d]+(?:讲|章|节)|继续(?:下一|第[一二三四五六七八九十\d]+)(?:讲|章|节)',statement))
+    return bool(re.search(r'(?:开始|继续)(?:写|生成|输出|编写|撰写)|(?:要求|请|帮我)(?:结合.{0,20})?(?:重写|撰写|写一篇|写一个|生成|输出)|开始第[一二三四五六七八九十百\d]+(?:讲|章|节)|继续(?:下一|第[一二三四五六七八九十\d]+)(?:讲|章|节)',statement))
+
+
+def statement_has_date(statement,date):
+    if not date:return True
+    if date in statement:return True
+    year,month,day=map(int,date.split('-'))
+    return bool(re.search(fr'{year}年0?{month}月0?{day}日',statement))

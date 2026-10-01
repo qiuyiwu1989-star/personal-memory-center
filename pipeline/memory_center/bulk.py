@@ -180,7 +180,10 @@ class Bulk:
             errors=[dict(r) for r in db.execute("SELECT conversation_id,segment_index,error FROM bulk_segments WHERE batch_id=? AND state='failed' ORDER BY created LIMIT 10",(batch_id,))]
         with self.store.db() as db:
             parser=db.execute('SELECT parser_version FROM bulk_batch_parsers WHERE batch_id=?',(batch_id,)).fetchone()
-        b=dict(batch);b['parser_version']=parser['parser_version'] if parser else 'legacy-flat-text';b['requires_replan']=b['parser_version']!=PARSER_VERSION
+        with self.store.db() as db:
+            additional=scoped_spent(db,batch['owner'],batch['scope'])
+        b=dict(batch);b['additional_tokens_spent']=additional;b['shared_tokens_spent']=batch['tokens_spent']+additional
+        b['parser_version']=parser['parser_version'] if parser else 'legacy-flat-text';b['requires_replan']=b['parser_version']!=PARSER_VERSION
         b['counts']=counts;b['sample_done']=samples['n']
         b['estimated_total_tokens']=round(samples['spent']/samples['n']*batch['total_segments']) if samples['n'] else None
         b['recent_errors']=errors

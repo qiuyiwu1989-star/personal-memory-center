@@ -27,7 +27,7 @@
     const count=batch.counts||{},done=(count.applied||0)+(count.failed||0);
     $('bulk-state').textContent=(names[batch.state]||batch.state)+' · '+done+' / '+batch.total_segments+' 个片段完成 · '+batch.total_conversations+' 段对话，'+batch.no_text_conversations+' 段没有可提炼文本 · '+batch.memory_documents+' 份已有记忆资料';
     $('bulk-metrics').replaceChildren(...[['planned','待入队'],['queued','处理中'],['applied','已完成'],['failed','失败']].map(([key,title])=>{const box=node('div',undefined,'job-metric');box.append(node('strong',String(count[key]||0)),node('span',title));return box;}));
-    $('bulk-budget').textContent='已计量及在途预留 '+batch.tokens_spent.toLocaleString()+' / '+batch.token_limit.toLocaleString()+' tokens · 样本 '+batch.sample_done+'/'+batch.sampled_segments+' 个'+(batch.estimated_total_tokens?' · 全量预估约 '+batch.estimated_total_tokens.toLocaleString()+' tokens':'。预估会在样本完成后显示。')+'。未返回用量的失败任务按 35,000 tokens 预留。';
+    $('bulk-budget').textContent='已计量及在途预留 '+(batch.shared_tokens_spent??batch.tokens_spent).toLocaleString()+' / '+batch.token_limit.toLocaleString()+' tokens · 样本 '+batch.sample_done+'/'+batch.sampled_segments+' 个'+(batch.estimated_total_tokens?' · 全量预估约 '+batch.estimated_total_tokens.toLocaleString()+' tokens':'。预估会在样本完成后显示。')+'。未返回用量的失败任务按 35,000 tokens 预留。';
     $('bulk-errors').textContent=batch.recent_errors?.length?'最近失败：'+batch.recent_errors.map(x=>x.conversation_id.slice(0,8)+' / '+x.segment_index+' · '+(x.error||'未提供原因')).join('；'):'';
     if(batch.requires_replan){
       $('bulk-errors').textContent='旧计划保留。新规划只读取正式正文；采用后仍等待质量评测，不会启动模型。';

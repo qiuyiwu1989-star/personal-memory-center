@@ -219,3 +219,15 @@ class BulkTest(unittest.TestCase):
         self.assertEqual(self.bulk.status(self.owner,batch['id'])['counts']['queued'],1)
 
 if __name__=='__main__':unittest.main()
+
+class BulkLedgerDisplayTest(unittest.TestCase):
+    def test_status_includes_quality_evaluation_in_shared_usage(self):
+        fixture=BulkTest();fixture.setUp()
+        try:
+            batch=fixture.bulk.create(fixture.owner,BATCH,100000)
+            with fixture.store.db() as db:
+                db.execute('INSERT INTO model_budgets VALUES(?,?,?,?,?,?,?)',('q',SCOPE,1000,456,0,'synthetic evaluation',0))
+            status=fixture.bulk.status(fixture.owner,batch['id'])
+            self.assertEqual(status['additional_tokens_spent'],456)
+            self.assertEqual(status['shared_tokens_spent'],status['tokens_spent']+456)
+        finally:fixture.tearDown()

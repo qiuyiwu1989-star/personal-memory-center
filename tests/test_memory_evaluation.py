@@ -113,3 +113,11 @@ class TemporalScopeGuardTest(unittest.TestCase):
         from pipeline.memory_center.claim_context import contains_immediate_command
         self.assertFalse(contains_immediate_command('用户在去年开始了第六讲。'))
         self.assertTrue(contains_immediate_command('用户要求继续写下一章。'))
+
+class DateRenderingTest(unittest.TestCase):
+    def test_same_chinese_calendar_date_is_not_rejected_for_format(self):
+        from pipeline.memory_center.claim_context import statement_has_date,contains_immediate_command
+        self.assertTrue(statement_has_date('2025年9月27日，用户要求真实案例。','2025-09-27'))
+        self.assertFalse(statement_has_date('2025年9月28日','2025-09-27'))
+        self.assertTrue(contains_immediate_command('用户要求写一篇新闻稿。'))
+        self.assertFalse(contains_immediate_command('项目长期约束：不要杜撰经历。'))
