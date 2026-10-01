@@ -26,3 +26,12 @@ class RetrievalModesTest(unittest.TestCase):
         with self.store.db() as db:db.execute("UPDATE record_governance SET state='candidate' WHERE record_id='0'")
         self.assertNotIn('0',[r['id'] for r in context(self.store,self.p,'personal','本地索引配置',retrieval_mode='lexical-v2')['records']])
         with self.assertRaises(PermissionError):context(self.store,self.p,'other','',retrieval_mode='lexical-v2')
+
+    def test_balanced_mode_is_opt_in_and_keeps_governance_boundary(self):
+        reply=context(self.store,self.p,'personal','请问本地索引的配置是什么',retrieval_mode='lexical-v3')
+        self.assertEqual(reply['retrieval'],'lexical-v3')
+        self.assertEqual(reply['records'][0]['id'],'0')
+        with self.store.db() as db:db.execute("UPDATE record_governance SET state='candidate' WHERE record_id='0'")
+        self.assertNotIn('0',[r['id'] for r in context(self.store,self.p,'personal','本地索引配置',retrieval_mode='lexical-v3')['records']])
+        with self.assertRaises(PermissionError):context(self.store,self.p,'other','',retrieval_mode='lexical-v3')
+        self.assertEqual(self.store.snapshot(self.p,'personal','索引')['retrieval'],'lexical-v1')

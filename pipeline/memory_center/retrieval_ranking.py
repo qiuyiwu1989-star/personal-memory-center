@@ -117,4 +117,64 @@ def legacy_rank_records(rows,query):
 def search_records(rows,query,mode='lexical-v1'):
     if mode=='lexical-v1':return legacy_rank_records(rows,query)
     if mode==RETRIEVAL_VERSION:return rank_records(rows,query)
+    if mode==RETRIEVAL_VERSION_V3:return rank_records_v3(rows,query)
     raise ValueError('Unknown retrieval mode')
+
+
+RETRIEVAL_VERSION_V3 = 'lexical-v3'
+# Grammar boundaries, not domain vocabulary. Preserve the complete runs too:
+# a boundary character may also be part of a proper name.
+_V3_BOUNDARY = re.compile(r'以及|或者|并且|关于|有关|对于|中的|之中|的|与|和')
+_V3_QUERY_WRAPPERS = ('能不能', '有没有', '请帮忙', '帮我', '查一下', '查找',
+                      '查询', '检索', '看看', '哪些', '一下')
+
+
+def query_terms_v3(query):
+    """Keep complete phrases and add grammatical segments, never single Han.
+
+    This deterministic rule is frozen independently of evaluation questions.
+    It is lexical segmentation, not inferred synonyms or factual reasoning.
+    """
+    base = query_terms(query)
+    text = _normal(query)
+    for wrapper in _WRAPPERS + _V3_QUERY_WRAPPERS:
+        text = text.replace(wrapper, ' ')
+    text = re.sub(r'[呢吗](?=[\s？?！!。.,，]*$)', ' ', text)
+    segments = []
+    for run in _RUN.findall(text):
+        if re.fullmatch(fr'[{_CJK}]+', run):
+            segments.extend(part for part in _V3_BOUNDARY.split(run)
+                            if len(part) >= 2 and part not in _PAIR_STOPS)
+    phrases = tuple(dict.fromkeys(base.phrases + tuple(segments)))
+    pairs = frozenset(pair for phrase in phrases for pair in (
+        phrase[i:i+2] for i in range(len(phrase)-1)) if pair not in _PAIR_STOPS)
+    return QueryTerms(phrases, pairs, base.latin, base.single)
+
+
+def _score_v3(row, terms):
+    fields = _fields(row)
+    content_fields = fields[:5]  # scope/topic can support, never open the gate
+    pairs = {pair for pair in terms.pairs if any(pair in text for _, text in content_fields)}
+    full = any(phrase in text for phrase in terms.phrases for _, text in content_fields)
+    latin_hit = any(re.search(r'(?<![a-z0-9_])' + re.escape(word) + r'(?![a-z0-9_])', text)
+                    for word in terms.latin for _, text in content_fields)
+    single_exact = any(word == text for word in terms.single for _, text in fields[2:4])
+    if not (full or latin_hit or len(pairs) >= 2 or single_exact):
+        return 0.0
+    # Same strongest-field arithmetic as v2: translations and repetitions do
+    # not count as independent support. Grammar segments change eligibility.
+    return _score(row, terms)
+
+
+def score_record_v3(row, query):
+    return _score_v3(row, query_terms_v3(query)) if query.strip() else 0.0
+
+
+def rank_records_v3(rows, query):
+    """Experimental balanced lexical mode over already permission-filtered rows."""
+    if not query.strip():
+        return list(rows)
+    terms = query_terms_v3(query)
+    scored = [(row, _score_v3(row, terms)) for row in rows]
+    return [row for row, score in sorted(scored, key=lambda entry: entry[1], reverse=True)
+            if score > 0]

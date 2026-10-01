@@ -88,9 +88,9 @@ def context(store, principal, scope, query, max_chars=1600, retrieval_mode='lexi
     if type(max_chars) is not int or not 500 <= max_chars <= 16000:
         raise Invalid('读取预算需为 500–16000 字符')
     snapshot = store.snapshot(principal,scope,query,limit=1000000,retrieval_mode=retrieval_mode)
-    from .retrieval_ranking import score_record
+    from .retrieval_ranking import score_record, score_record_v3
     rows = sorted((r for r in snapshot['records'] if usable(r)),
-                  key=lambda r:(-score_record(r,query),r['governance']['priority']) if query.strip() and retrieval_mode=='lexical-v2' else (0,r['governance']['priority']))
+                  key=lambda r:(-(score_record_v3(r,query) if retrieval_mode=='lexical-v3' else score_record(r,query)),r['governance']['priority']) if query.strip() and retrieval_mode in ('lexical-v2','lexical-v3') else (0,r['governance']['priority']))
     result = {'records': [], 'total': len(rows), 'truncated': bool(rows), 'policy': 'verified-or-owner-corrected-v1', 'retrieval':retrieval_mode}
     for row in rows:
         item = {k:row[k] for k in ('id','statement','source_id','message_id','revision','governance')}

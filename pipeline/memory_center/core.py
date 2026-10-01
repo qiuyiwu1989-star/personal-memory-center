@@ -281,7 +281,7 @@ class Store:
             row['review_note'] = (usage.get('review_notes') or {}).get(row['statement'])
             row['processing_method'] = usage.get('method', 'llm' if row['message_id'] != 'correction' else 'owner_correction')
         from .retrieval_ranking import search_records
-        if retrieval_mode not in ('lexical-v1','lexical-v2'):raise Invalid('检索模式无效')
+        if retrieval_mode not in ('lexical-v1','lexical-v2','lexical-v3'):raise Invalid('检索模式无效')
         rows=search_records(rows,query,retrieval_mode)
         if governance_filter:
             if governance_filter not in ('candidate','verified','owner_corrected','historical','rejected','usable','history'):
@@ -423,6 +423,10 @@ def validate_plan(plan, source):
             status = 'user_stated'
         from .claim_context import evidence_context, contains_immediate_command, statement_has_date
         if source.get('processing_method_version') in ('2026-10-01.6','2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10'):
+            # A narrow mechanical guard, not an entailment classifier: preserve
+            # an explicitly wished-for action rather than declaring a decision.
+            if '希望' in c['quote'] and '决定' not in c['quote'] and re.search(r'用户(?:已|已经)?决定',c['statement']):
+                raise Invalid('来源仅表达希望，不能将其升格为用户决定')
             if contains_immediate_command(c['statement']):
                 raise Invalid('即时开工或续写指令不能混入长期记忆，请只提取明确的项目约束')
             context = evidence_context(message,source['source_type'])

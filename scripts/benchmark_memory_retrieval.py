@@ -86,7 +86,7 @@ def run_benchmark(store, principal, scope, tasks=TASKS, max_chars=1600,retrieval
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--retrieval-mode',choices=['lexical-v1','lexical-v2'],default='lexical-v1')
+    parser.add_argument('--retrieval-mode',choices=['lexical-v1','lexical-v2','lexical-v3'],default='lexical-v1')
     parser.add_argument('--input',required=True,type=Path)
     parser.add_argument('--results',required=True,type=Path)
     parser.add_argument('--output',required=True,type=Path)
