@@ -76,5 +76,38 @@ class ModalityTest(unittest.TestCase):
         result=resolve_plan({'claims':[claim]},spans,version='2026-10-01.14')
         self.assertEqual(result['claims'][0]['modality'],'wish')
 
+    def test_permission_cannot_be_promoted_to_mandatory_or_prohibited(self):
+        for quote in ('我可以为合成项目采用 Atlas。','合成项目支持可选离线查询。',
+                      '我允许合成项目使用离线查询。','The synthetic project may use Atlas.',
+                      'The synthetic project can use Atlas.'):
+            for statement in ('用户要求合成项目采用 Atlas。','合成项目必须采用 Atlas。',
+                              '合成项目应当采用 Atlas。','用户禁止采用 Atlas。',
+                              'The synthetic project must use Atlas.'):
+                with self.subTest(quote=quote,statement=statement):
+                    self.assertIsNotNone(modality_problem(quote,statement,'claim'))
+
+    def test_permission_guard_preserves_weaker_statements_and_mixed_constraints(self):
+        for quote,statement in (
+            ('我可以采用 Atlas。','用户可以采用 Atlas。'),
+            ('我的项目叫 Atlas，可以离线查询。','用户的项目叫 Atlas。'),
+            ('我的项目叫 Atlas，可以离线查询。','用户不要求离线查询。'),
+            ('我的项目叫 Atlas，可以离线查询。','用户不要求项目必须支持离线查询。'),
+            ('The synthetic project may use Atlas.','Atlas is not required.'),
+            ('我的项目可以离线查询，但必须保留出处。','项目必须保留出处。'),
+            ('我允许离线查询，不允许自动发布。','用户禁止自动发布。'),
+            ('我的项目可以离线查询，我已决定默认离线。','用户已决定默认离线。'),
+            ('如果独立评测通过，我可以采用 Atlas。','如果独立评测通过，用户可以采用 Atlas。'),
+        ):
+            with self.subTest(quote=quote,statement=statement):
+                self.assertIsNone(modality_problem(quote,statement,'claim'))
+
+    def test_permission_promotion_is_rejected_in_resolver_with_exact_evidence(self):
+        text='合成项目可以采用离线查询。'
+        _,spans,_=self.prepare(text)
+        with self.assertRaises(Invalid):
+            resolve_plan({'claims':[self.claim(next(iter(spans)),'合成项目必须采用离线查询。')]},
+                         spans,version='2026-10-01.14')
+        self.assertEqual(next(iter(spans.values()))['quote'],text)
+
 
 if __name__=='__main__':unittest.main()

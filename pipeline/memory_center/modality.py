@@ -6,6 +6,26 @@ PLAN = re.compile(r'计划|打算|准备|拟(?:于|在|采用)|\b(?:plan|intend)
 CONDITION = re.compile(r'如果|只要|只有|除非|倘若|假如|若(?:能|是|有|通过)|前提|在.{1,40}的情况下|通过后|\b(?:if|unless|provided that)\b', re.I)
 ASSERTED = re.compile(r'已(?:经)?(?:决定|确定|完成|实现|部署|采用)|确定采用|正式采用|\b(?:completed|implemented|decided|deployed)\b', re.I)
 LIST = re.compile(r'(?:^|\n)\s*(?:[-*•]|\d+[.、)]|[一二三四五六七八九十]+[、.])\s*')
+PERMISSION = re.compile(r'可以|可选|允许|\b(?:may|can|optional|permitted)\b', re.I)
+OBLIGATION = re.compile(r'要求|必须|应当|禁止|不得|不允许|不可以|不能|不应|决定|\b(?:must|required|requires?|mandatory|shall|forbidden|prohibited|decided)\b', re.I)
+
+
+def _strong_statement(text):
+    """Ignore plainly negated obligations, e.g. 不要求 and not required.
+
+    This is deliberately narrow: ambiguous mixed or double-negated statements
+    stay for semantic review rather than being called safe by this helper.
+    """
+    # Negation can govern a later modal phrase (不要求它必须...). Abstain
+    # on that entire statement instead of pretending to resolve its scope.
+    if re.search(r'(?:不|没有|无需|无须|并非|不是)\s*(?:要求|必须|应当|禁止)|\b(?:not|no)\s+(?:required|mandatory|prohibited)',text,re.I):
+        return False
+    for match in OBLIGATION.finditer(text):
+        prefix=text[max(0,match.start()-20):match.start()]
+        if re.search(r'(?:不|没有|无需|无须|并非|不是|not\s|no\s)\s*$',prefix,re.I):
+            continue
+        return True
+    return False
 
 
 def evidence_ranges(text):
@@ -58,6 +78,11 @@ def modality_problem(quote, statement, kind):
     modal promotion is rejected; all other claims still need quality evaluation.
     """
     mode = evidence_modality(quote)
+    # Only an entirely permissive source qualifies. Any obligation/decision
+    # marker in a mixed source makes this lexical guard abstain; it must not
+    # erase a genuine mandatory fact next to an optional one.
+    if PERMISSION.search(quote) and not OBLIGATION.search(quote) and _strong_statement(statement):
+        return '许可或可选项证据不能增强为要求、必须或禁止'
     if mode in ('wish', 'plan'):
         # A named fact inside an unsplittable mixed passage is not automatically
         # a wish. Strong completion still requires explicit source support.
