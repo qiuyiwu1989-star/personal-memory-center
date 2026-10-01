@@ -327,6 +327,19 @@
   $('search-form').addEventListener('submit',e=>{e.preventDefault();refresh();});['scope','history'].forEach(id=>$(id).addEventListener('change',refresh));$('refresh').addEventListener('click',refresh);
   $('document-search-form').addEventListener('submit',async e=>{e.preventDefault();try{await refreshDocuments();}catch(err){notice(err.message,true);}});
   let evidenceNext=null, evidenceQuery='', evidenceScope='';
+  function openDependencyPreview(impact,source){
+    $('reader-title').textContent='资料关联 · '+(source.source_title||'原文');
+    const host=$('reader-body');host.replaceChildren();
+    host.append(node('p','显示这份资料直接关联的记忆、任务与主题文档。','muted'));
+    const counts=node('div',undefined,'job-summary');
+    const names={records:'已整理记忆',jobs:'资料处理任务',extraction_runs:'再次提炼任务',document_versions:'文档版本引用',topic_rules:'可能关联的主题',index_chunks:'可检索片段'};
+    for(const [key,title] of Object.entries(names)){const item=node('article',undefined,'record');item.append(node('strong',String(impact.counts[key]||0)),node('p',title,'muted'));counts.append(item);}host.append(counts);
+    if(!impact.counts.records)host.append(node('p','原文已归档，尚未形成已整理记忆。'));
+    if(impact.risks.includes('unfinished_processing'))host.append(node('p','还有未完成的处理任务。'));
+    if(impact.counts.document_versions)host.append(node('p','文档数量包含历史版本，不能等同于当前主题数量。','muted'));
+    host.append(node('p','间接关联与外部缓存尚未包含在此预览中。','muted'));
+    $('document-reader').showModal();
+  }
   async function searchEvidence(append=false){
     const scope=$('scope').value, query=$('evidence-query').value;
     const offset=append?evidenceNext:0;
@@ -339,7 +352,7 @@
     $('evidence-more').hidden=evidenceNext===null;
     for(const result of data.results){
       const card=node('article',undefined,'record topic-tile');
-      card.append(node('span',result.role==='user'?'用户原话':result.role==='assistant'?'助手发言':'外部材料','tag'),node('h3',result.source_title||result.source_key),node('p',result.source_date||'来源时间未知','muted'),node('p',result.snippet,'tile-excerpt'));
+      card.append(node('span',result.material_type==='imported_summary'?'已有摘要 · 二手来源':result.material_type==='document'?'上传文档':result.role==='user'?'用户发言':result.role==='assistant'?'助手发言':'外部材料','tag'),node('h3',result.source_title||result.source_key),node('p',result.source_date||'来源时间未知','muted'),node('p',result.snippet,'tile-excerpt'));
       const read=node('button','展开出处','primary');read.addEventListener('click',async()=>{
         try{const page=await api('/archive-source',{scope,locator:result.locator,max_chars:8000});
           openDocument((result.source_title||'原文')+' · '+result.role,page.text);
@@ -348,12 +361,12 @@
           $('reader-body').append(more);
         }catch(err){notice(err.message,true);}
       });card.append(read);
-      const dependencies=node('button','关联内容');dependencies.addEventListener('click',async()=>{try{const impact=await api('/sources/'+encodeURIComponent(result.source_id)+'/dependencies?'+new URLSearchParams({scope,max_chars:10000}));openDocument('资料关联预览 · 不执行删除',JSON.stringify(impact,null,2));}catch(err){notice(err.message,true);}});card.append(dependencies);$('evidence-list').append(card);
+      const dependencies=node('button','关联内容');dependencies.addEventListener('click',async()=>{try{const impact=await api('/sources/'+encodeURIComponent(result.source_id)+'/dependencies?'+new URLSearchParams({scope,max_chars:10000}));openDependencyPreview(impact,result);}catch(err){notice(err.message,true);}});card.append(dependencies);$('evidence-list').append(card);
     }
   }
   $('evidence-form').addEventListener('submit',e=>{e.preventDefault();searchEvidence().catch(err=>notice(err.message,true));});
   $('evidence-more').addEventListener('click',()=>searchEvidence(true).catch(err=>notice(err.message,true)));
-  $('evidence-index').addEventListener('click',async()=>{const button=$('evidence-index');button.disabled=true;try{const result=await api('/archive-index',{scope:$('scope').value});notice('索引更新完成：'+result.indexed_sources+' 份更新，'+result.unchanged_sources+' 份未变；没有调用模型。');await searchEvidence();}catch(err){notice(err.message,true);}finally{button.disabled=false;}});
+  $('evidence-index').addEventListener('click',async()=>{const button=$('evidence-index');button.disabled=true;try{const result=await api('/archive-index',{scope:$('scope').value});notice('索引更新完成：'+result.indexed_sources+' 份更新，'+result.unchanged_sources+' 份未变；'+result.skipped_legacy_sources+' 份旧投影保留在档案中；没有调用模型。');await searchEvidence();}catch(err){notice(err.message,true);}finally{button.disabled=false;}});
   $('scope').addEventListener('change',()=>{$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;evidenceNext=null;});
   function showView() {
     const requested=location.hash.slice(1);
