@@ -422,20 +422,27 @@ def validate_plan(plan, source):
         elif message['role'] == 'user' and source['trusted_user']:
             status = 'user_stated'
         from .claim_context import evidence_context, contains_immediate_command, statement_has_date
-        if source.get('processing_method_version') in ('2026-10-01.6','2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10'):
+        if source.get('processing_method_version') in ('2026-10-01.6','2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13'):
+            context = evidence_context(message,source['source_type'])
+            semantic_statement = c['statement']
+            if source.get('processing_method_version')=='2026-10-01.13' and source['source_type']!='imported_summary':
+                prefix = ('来源消息日期：'+context['source_date']+'（非事件成立时间，当前有效性待核实）。') if context['source_date'] else ''
+                if c['topic']=='projects' and context['conversation_title']:
+                    prefix += '来源对话：'+context['conversation_title']+'。'
+                if prefix and semantic_statement.startswith(prefix):
+                    semantic_statement = semantic_statement[len(prefix):]
             # A narrow mechanical guard, not an entailment classifier: preserve
             # an explicitly wished-for action rather than declaring a decision.
-            if '希望' in c['quote'] and '决定' not in c['quote'] and re.search(r'用户(?:已|已经)?决定',c['statement']):
+            if '希望' in c['quote'] and '决定' not in c['quote'] and re.search(r'用户(?:已|已经)?决定',semantic_statement):
                 raise Invalid('来源仅表达希望，不能将其升格为用户决定')
-            if contains_immediate_command(c['statement']):
+            if contains_immediate_command(semantic_statement):
                 raise Invalid('即时开工或续写指令不能混入长期记忆，请只提取明确的项目约束')
-            context = evidence_context(message,source['source_type'])
             if source['source_type'] != 'imported_summary':
                 if context['source_date'] and not statement_has_date(c['statement'],context['source_date']):
                     raise Invalid('历史陈述必须保留来源日期，不能把历史要求当成当前状态')
                 if c['topic']=='projects' and context['conversation_title'] and context['conversation_title'] not in c['statement']:
                     raise Invalid('项目陈述必须保留来源对话标题，不能猜测项目身份或使用模糊指代')
-            elif source.get('processing_method_version') in ('2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10') and '原始时间未知' not in c['statement']:
+            elif source.get('processing_method_version') in ('2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13') and '原始时间未知' not in c['statement']:
                 raise Invalid('摘要更新时间不能充当事件时间，请明确原始时间未知')
             elif not c['statement'].startswith(('摘要记载','摘要主张')):
                 raise Invalid('二手摘要必须明确归属，不能升格为本人陈述')
