@@ -200,7 +200,7 @@
     } catch(err) {token='';identity=null;if(!['127.0.0.1','localhost'].includes(location.hostname)){notice('登录已失效，请重新登录后台。',true);const link=node('a','登录后台');link.href='/admin/login.html';$('notice').append(link);}else{$('login').hidden=false;notice(err.message,true);}}
   }
   $('login-form').addEventListener('submit',async e=>{e.preventDefault();token=$('token').value.trim();await connect();});
-  $('logout').addEventListener('click',()=>{clearInterval(timer);token='';identity=null;$('workspace').hidden=true;$('login').hidden=false;$('records').replaceChildren();$('jobs').replaceChildren();$('documents').replaceChildren();notice('已断开，页面内凭据已清除。');});
+  $('logout').addEventListener('click',()=>{clearInterval(timer);token='';identity=null;$('workspace').hidden=true;$('login').hidden=false;$('records').replaceChildren();$('jobs').replaceChildren();$('documents').replaceChildren();$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;$('document-reader').close();notice('已断开，页面内凭据已清除。');});
   $('ingest-form').addEventListener('submit',async e=>{
     e.preventDefault();const button=$('ingest-submit');button.disabled=true;
     const text=$('material').value,type=$('source-type').value,scope=$('ingest-scope').value,name=fileName;
@@ -334,18 +334,18 @@
     const counts=node('div',undefined,'job-summary');
     const names={records:'已整理记忆',jobs:'资料处理任务',extraction_runs:'再次提炼任务',document_versions:'文档版本引用',topic_rules:'可能关联的主题',index_chunks:'可检索片段'};
     for(const [key,title] of Object.entries(names)){const item=node('article',undefined,'record');item.append(node('strong',String(impact.counts[key]||0)),node('p',title,'muted'));counts.append(item);}host.append(counts);
-    if(!impact.counts.records)host.append(node('p','原文已归档，尚未形成已整理记忆。'));
+    if(!impact.counts.records)host.append(node('p','此资料版本尚无直接关联的已整理记忆。'));
     if(impact.risks.includes('unfinished_processing'))host.append(node('p','还有未完成的处理任务。'));
     if(impact.counts.document_versions)host.append(node('p','文档数量包含历史版本，不能等同于当前主题数量。','muted'));
     host.append(node('p','间接关联与外部缓存尚未包含在此预览中。','muted'));
     $('document-reader').showModal();
   }
   async function searchEvidence(append=false){
-    const scope=$('scope').value, query=$('evidence-query').value;
+    const scope=$('scope').value, query=$('evidence-query').value, activeIdentity=identity, activeToken=token;
     const offset=append?evidenceNext:0;
     if(append && (scope!==evidenceScope || query!==evidenceQuery || offset===null))return;
     const data=await api('/archive-search?'+new URLSearchParams({scope,q:query,offset,max_chars:16000}));
-    if(scope!==$('scope').value || query!==$('evidence-query').value)return;
+    if(identity!==activeIdentity || token!==activeToken || scope!==$('scope').value || query!==$('evidence-query').value)return;
     evidenceScope=scope;evidenceQuery=query;evidenceNext=data.next_offset;
     if(!append)$('evidence-list').replaceChildren();
     $('evidence-summary').textContent=data.total+' 个匹配片段 · 仅已建索引的资料 · 不使用模型 tokens';
@@ -355,13 +355,14 @@
       card.append(node('span',result.material_type==='imported_summary'?'已有摘要 · 二手来源':result.material_type==='document'?'上传文档':result.role==='user'?'用户发言':result.role==='assistant'?'助手发言':'外部材料','tag'),node('h3',result.source_title||result.source_key),node('p',result.source_date||'来源时间未知','muted'),node('p',result.snippet,'tile-excerpt'));
       const read=node('button','展开出处','primary');read.addEventListener('click',async()=>{
         try{const page=await api('/archive-source',{scope,locator:result.locator,max_chars:8000});
+          if(identity!==activeIdentity || token!==activeToken || scope!==$('scope').value)return;
           openDocument((result.source_title||'原文')+' · '+result.role,page.text);
           const more=node('button','继续阅读');more.hidden=page.next_offset===null;let next=page.next_offset;
-          more.addEventListener('click',async()=>{try{const part=await api('/archive-source',{scope,locator:result.locator,offset:next,max_chars:8000});$('reader-body').append(node('pre',part.text));next=part.next_offset;more.hidden=next===null;}catch(err){notice(err.message,true);}});
+          more.addEventListener('click',async()=>{try{const part=await api('/archive-source',{scope,locator:result.locator,offset:next,max_chars:8000});if(identity!==activeIdentity || token!==activeToken || scope!==$('scope').value)return;$('reader-body').append(node('pre',part.text));next=part.next_offset;more.hidden=next===null;}catch(err){notice(err.message,true);}});
           $('reader-body').append(more);
         }catch(err){notice(err.message,true);}
       });card.append(read);
-      const dependencies=node('button','关联内容');dependencies.addEventListener('click',async()=>{try{const impact=await api('/sources/'+encodeURIComponent(result.source_id)+'/dependencies?'+new URLSearchParams({scope,max_chars:10000}));openDependencyPreview(impact,result);}catch(err){notice(err.message,true);}});card.append(dependencies);$('evidence-list').append(card);
+      const dependencies=node('button','关联内容');dependencies.addEventListener('click',async()=>{try{const impact=await api('/sources/'+encodeURIComponent(result.source_id)+'/dependencies?'+new URLSearchParams({scope,max_chars:10000}));if(identity!==activeIdentity || token!==activeToken || scope!==$('scope').value)return;openDependencyPreview(impact,result);}catch(err){notice(err.message,true);}});card.append(dependencies);$('evidence-list').append(card);
     }
   }
   $('evidence-form').addEventListener('submit',e=>{e.preventDefault();searchEvidence().catch(err=>notice(err.message,true));});
