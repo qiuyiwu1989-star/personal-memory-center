@@ -37,9 +37,9 @@ class ExtractionGuardTest(unittest.TestCase):
         from pipeline.memory_center.model import Model,PROMPT_VERSION
         from pipeline.memory_center.core import encoded
         class Capture(Model):
-            def _call(self,system,payload,version,max_tokens=4096):return payload,version
+            def _call(self,system,payload,version,max_tokens=4096):return {'claims':[]},{'payload':payload,'version':version}
         result,version=Capture().extract_source({'source_type':'imported_summary','payload':encoded([{'id':'1','role':'external','text':'Synthetic recommendation'}])})
-        self.assertEqual(result['source_type'],'imported_summary');self.assertEqual(version,PROMPT_VERSION)
+        self.assertEqual(version['payload']['source_type'],'imported_summary');self.assertEqual(version['version'],PROMPT_VERSION)
 
     def test_bounded_request_uses_same_shared_ledger(self):
         import tempfile
