@@ -54,3 +54,30 @@ class ExtractionGuardTest(unittest.TestCase):
                 attempt=reserve_request(db,source,'synthetic-case','Synthetic system prompt',1024)
                 self.assertIsNotNone(attempt);settle(db,attempt,{'total_tokens':20})
             self.assertEqual(status(store,owner,'personal')['tokens_spent'],20)
+
+class SuiteGateTest(unittest.TestCase):
+    def test_format_pass_is_not_quality_pass(self):
+        from pipeline.memory_center.evaluation import suite_gate
+        run={'sample_index':1,'version':'v','max_output_tokens':1024,'validation':'passed'}
+        result=suite_gate([1,2],[run],'v',1024)
+        self.assertEqual(result['missing_cases'],[2])
+        self.assertEqual(result['review_pending_cases'],[1])
+        self.assertFalse(result['ready_for_owner_quality_decision'])
+        self.assertFalse(result['quality_approved'])
+
+    def test_mixed_methods_duplicate_runs_and_failed_reviews_block(self):
+        from pipeline.memory_center.evaluation import suite_gate
+        runs=[{'sample_index':1,'version':'old','max_output_tokens':1024,'validation':'passed'},
+              {'sample_index':2},{'sample_index':2}]
+        result=suite_gate([1,2],runs,'v',1024)
+        self.assertEqual(result['incomparable_cases'],[1]);self.assertEqual(result['failed_cases'],[2])
+
+    def test_complete_review_only_makes_owner_decision_ready(self):
+        from pipeline.memory_center.evaluation import suite_gate
+        run={'sample_index':1,'version':'v','max_output_tokens':1024,'validation':'passed',
+             'review':dict.fromkeys(['semantic_support','speaker_attribution','time_handling','scope_handling','durable_value'],'pass')}
+        result=suite_gate([1],[run],'v',1024)
+        self.assertTrue(result['ready_for_owner_quality_decision'])
+        self.assertFalse(result['quality_approved']);self.assertFalse(result['production_dispatch_enabled'])
+        run['review']['time_handling']='fail'
+        self.assertEqual(suite_gate([1],[run],'v',1024)['failed_cases'],[1])
