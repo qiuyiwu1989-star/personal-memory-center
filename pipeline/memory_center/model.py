@@ -116,9 +116,10 @@ def load_private_model_config(path):
 
 
 class ModelOutputError(Invalid):
-    def __init__(self, message, usage):
+    def __init__(self, message, usage, code='output_contract'):
         super().__init__(message)
         self.usage = usage
+        self.code = code
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -165,11 +166,11 @@ class Model:
         measured['method_version'] = version
         measured['attempt_measured'] = True
         if data['choices'][0].get('finish_reason') == 'length':
-            raise ModelOutputError('模型输出被截断，请缩小材料批次', measured)
+            raise ModelOutputError('模型输出被截断，请缩小材料批次', measured, 'output_truncated')
         try:
             plan = json.loads(data['choices'][0]['message']['content'])
         except (ValueError, TypeError):
-            raise ModelOutputError('模型未返回有效 JSON', measured) from None
+            raise ModelOutputError('模型未返回有效 JSON', measured, 'invalid_json') from None
         return plan, measured
 
 
@@ -183,13 +184,13 @@ class Model:
             return {'claims':[]},{'total_tokens':0,'method_version':PROMPT_VERSION,'routing':routes,'model_skipped':True}
         plan,usage=self._call(PROMPT,request,PROMPT_VERSION)
         try:resolved=resolve_plan(plan,spans,version=PROMPT_VERSION)
-        except Invalid as exc:raise ModelOutputError(str(exc),usage) from None
+        except Invalid as exc:raise ModelOutputError(str(exc),usage,'source_span_contract') from None
         from .extraction_quality import review, review_notes
         try:
             assessment=review(resolved['claims'],source=source)
             notes=review_notes(assessment,resolved['claims'])
         except Exception as exc:
-            raise ModelOutputError('提炼质量诊断未完成：'+type(exc).__name__,usage) from None
+            raise ModelOutputError('提炼质量诊断未完成：'+type(exc).__name__,usage,'quality_diagnostic') from None
         return resolved,dict(usage,routing=routes,
                              quality_review_notes=notes,
                              quality_assessment=assessment)
@@ -202,5 +203,5 @@ class Model:
         result, usage = self._call(prompt, {'statement': statement}, 'zh-projection-v1')
         text = result.get('text') if isinstance(result, dict) else None
         if not isinstance(text, str) or not text.strip() or len(text) > 2000:
-            raise ModelOutputError('翻译输出无效', usage)
+            raise ModelOutputError('翻译输出无效', usage, 'translation_contract')
         return text, usage
