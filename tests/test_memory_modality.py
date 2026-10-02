@@ -76,6 +76,14 @@ class ModalityTest(unittest.TestCase):
         result=resolve_plan({'claims':[claim]},spans,version='2026-10-01.14')
         self.assertEqual(result['claims'][0]['modality'],'wish')
 
+    def test_artifact_capability_in_request_is_not_optional_grant(self):
+        from pipeline.memory_center.modality import modality_problem
+        for quote in ('请做成可以折叠的合成清单。', '帮我生成一个可以缩放的合成示意图。'):
+            self.assertIsNone(modality_problem(quote, '用户要求制作该合成产物。', 'claim'))
+        for quote in ('请做成可以折叠的合成清单，也可以选择普通列表。',
+                      '请生成合成图，我允许采用可选布局。'):
+            self.assertIsNotNone(modality_problem(quote, '用户要求必须采用折叠布局。', 'claim'))
+
     def test_permission_cannot_be_promoted_to_mandatory_or_prohibited(self):
         for quote in ('我可以为合成项目采用 Atlas。','合成项目支持可选离线查询。',
                       '我允许合成项目使用离线查询。','The synthetic project may use Atlas.',

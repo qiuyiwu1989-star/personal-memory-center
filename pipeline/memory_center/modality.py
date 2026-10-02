@@ -8,6 +8,22 @@ ASSERTED = re.compile(r'已(?:经)?(?:决定|确定|完成|实现|部署|采用)
 LIST = re.compile(r'(?:^|\n)\s*(?:[-*•]|\d+[.、)]|[一二三四五六七八九十]+[、.])\s*')
 PERMISSION = re.compile(r'可以|可选|允许|\b(?:may|can|optional|permitted)\b', re.I)
 OBLIGATION = re.compile(r'要求|必须|应当|禁止|不得|不允许|不可以|不能|不应|决定|\b(?:must|required|requires?|mandatory|shall|forbidden|prohibited|decided)\b', re.I)
+GUARD_VERSION = 'permission-scope-v2'
+
+
+def _permission_signal(text):
+    """Artifact capability inside an explicit build request is not permission.
+
+    Only a narrow capability construction is removed. Explicit optional/grant
+    markers and remaining permission text still retain the existing guard.
+    This is not a general modality parser or semantic quality approval.
+    """
+    if not re.search(r'允许|可选|可以选择|\b(?:may|optional|permitted)\b', text, re.I):
+        text = re.sub(
+            r'((?:做成|写成|制作|生成|构建|设计)[^。！？!?；;\n]{0,60})'
+            r'可以(?=像|支持|实现|显示|切换|运行|翻页|播放|全屏|折叠|缩放)',
+            r'\1能够', text)
+    return bool(PERMISSION.search(text))
 
 
 def _strong_statement(text):
@@ -81,7 +97,7 @@ def modality_problem(quote, statement, kind):
     # Only an entirely permissive source qualifies. Any obligation/decision
     # marker in a mixed source makes this lexical guard abstain; it must not
     # erase a genuine mandatory fact next to an optional one.
-    if PERMISSION.search(quote) and not OBLIGATION.search(quote) and _strong_statement(statement):
+    if _permission_signal(quote) and not OBLIGATION.search(quote) and _strong_statement(statement):
         return '许可或可选项证据不能增强为要求、必须或禁止'
     if mode in ('wish', 'plan'):
         # A named fact inside an unsplittable mixed passage is not automatically

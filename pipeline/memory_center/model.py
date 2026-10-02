@@ -191,7 +191,8 @@ class Model:
             notes=review_notes(assessment,resolved['claims'])
         except Exception as exc:
             raise ModelOutputError('提炼质量诊断未完成：'+type(exc).__name__,usage,'quality_diagnostic') from None
-        return resolved,dict(usage,routing=routes,
+        from .modality import GUARD_VERSION
+        return resolved,dict(usage,routing=routes,modality_guard_version=GUARD_VERSION,
                              quality_review_notes=notes,
                              quality_assessment=assessment)
 
