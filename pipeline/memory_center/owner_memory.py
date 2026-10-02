@@ -12,7 +12,7 @@ from .governance import metadata
 
 _TOPICS={'profile','preferences','people','areas','projects','topics'}
 _KINDS={'identity','preference','relationship','decision','plan','event','claim','suggestion'}
-_BASE={'request_key','statement','topic','kind','subject','governance','explicit_confirmation'}
+_BASE={'request_key','statement','topic','kind','subject','governance','explicit_confirmation','change_kind','previous_valid_until'}
 
 
 def _auth(principal,scope):
@@ -50,6 +50,9 @@ def _request(body,revision=False):
     values=normalize(dict(gov,state=gov.get('state','verified' if result['explicit_confirmation'] else 'candidate')))
     if (values['state']=='verified') != result['explicit_confirmation']:
         raise Invalid('verified 必须对应本次明确确认，不能从旧状态推断')
+    from .temporal import request as temporal_request
+    if 'change_kind' in body or 'previous_valid_until' in body:
+        result.update(temporal_request(body))
     result['governance']=values
     return result
 
@@ -104,6 +107,7 @@ def _governance(db,principal,record_id,governance,previous,now):
         'record_id','holder','subject_id','as_of','valid_until','state','priority','revision','note','reviewed')))
     db.execute('INSERT INTO governance_events VALUES(?,?,?,?,?,?)',
                (uid(),record_id,principal['id'],encoded(previous),encoded(new),now))
+    return new
 
 
 def create(store,principal,scope,body):
@@ -120,7 +124,9 @@ def create(store,principal,scope,body):
         db.execute('INSERT INTO records VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                    (rid,principal['owner'],scope,request.get('topic','topics'),request.get('kind','claim'),
                     request.get('subject','未指定'),statement,'user_stated',sid,mid,statement,'active',1,None,now))
-        _governance(db,principal,rid,request['governance'],{},now)
+        governance=_governance(db,principal,rid,request['governance'],{},now)
+        from .temporal import record as audit_change, request as temporal_request
+        audit_change(store,db,principal,scope,rid,None,1,governance,key,temporal_request(request),now)
         db.execute('INSERT INTO events VALUES(?,?,?,?,?,?)',(uid(),rid,principal['id'],'owner_create',None,now))
     return {'id':rid,'revision':1,'source_id':sid,'duplicate':False,
             'explicit_confirmation':request['explicit_confirmation'],'index_queued':True}
@@ -159,7 +165,9 @@ def revise(store,principal,scope,record_id,body):
             db.execute('INSERT INTO record_translations(record_id,language,text,run_id,reviewed) '
                        'SELECT ?,language,text,run_id,reviewed FROM record_translations WHERE record_id=?',
                        (rid,record_id))
-        _governance(db,principal,rid,request['governance'],previous,now)
+        governance=_governance(db,principal,rid,request['governance'],previous,now)
+        from .temporal import record as audit_change, request as temporal_request
+        audit_change(store,db,principal,scope,rid,record_id,old['revision']+1,governance,key,temporal_request(request),now)
         db.execute('INSERT INTO events VALUES(?,?,?,?,?,?)',
                    (uid(),rid,principal['id'],'owner_statement_edit' if changed else 'owner_governance_edit',record_id,now))
     return {'id':rid,'revision':old['revision']+1,'source_id':audit_sid,'duplicate':False,

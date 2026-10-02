@@ -36,13 +36,15 @@ def metadata(row, stored=None):
 def review(store, principal, record_id, body):
     if principal.get('trusted_user') is not True:
         raise PermissionError('仅本人可核实归属和有效状态')
-    if not isinstance(body, dict) or set(body) - (set(('revision',)) | set(('holder','subject_id','as_of','valid_until','state','priority','note'))):
+    if not isinstance(body, dict) or set(body) - (set(('revision','change_kind','previous_valid_until')) | set(('holder','subject_id','as_of','valid_until','state','priority','note'))):
         raise Invalid('治理字段无效')
     if type(body.get('revision')) is not int or body['revision'] < 0:
         raise Invalid('需要有效的治理 revision')
     if 'state' not in body:
         raise Invalid('治理状态无效')
-    values = normalize({key: value for key, value in body.items() if key != 'revision'})
+    from .temporal import request as temporal_request
+    change=temporal_request(body)
+    values = normalize({key: value for key, value in body.items() if key not in ('revision','change_kind','previous_valid_until')})
     state, priority = values['state'], values['priority']
     with store.db() as db:
         db.execute('BEGIN IMMEDIATE')
@@ -61,6 +63,9 @@ def review(store, principal, record_id, body):
                    tuple(new[k] for k in ('record_id','holder','subject_id','as_of','valid_until','state','priority','revision','note','reviewed')))
         db.execute('INSERT INTO governance_events VALUES(?,?,?,?,?,?)',
                    (uid(),record_id,principal['id'],encoded(old),encoded(new),time.time()))
+        from .temporal import record as audit_change
+        audit_change(store,db,principal,row['scope'],record_id,record_id,row['revision'],new,
+                    'governance:'+record_id+':'+str(new['revision']),change,previous_governance=old)
     return new
 
 

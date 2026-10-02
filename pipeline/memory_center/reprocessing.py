@@ -138,6 +138,8 @@ def process_one(store,model):
         if run['method_version']!=PROMPT_VERSION:
             db.execute("UPDATE extraction_runs SET state='failed',error='method_version_changed' WHERE id=?",(run['id'],));return True
         source=dict(db.execute('SELECT * FROM sources WHERE id=?',(run['source_id'],)).fetchone())
+        from .source_metadata import load as load_metadata
+        source['source_metadata']=load_metadata(db,source['id'])
         operation=db.execute('SELECT * FROM run_operations WHERE run_id=?',(run['id'],)).fetchone()
         operation=dict(operation) if operation else {'operation':'reextract'}
         if operation['operation']=='translate':

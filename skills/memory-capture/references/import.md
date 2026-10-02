@@ -25,7 +25,10 @@ created_at (each ≤300 chars). The server rejects a batch above 100 messages or
 This is neither a 24k-token limit nor a total-request byte limit.
 
 Allowed source_metadata keys: original_ref, original_date, author, locator,
-parser_version, parent_source_key; each a string ≤1,000 chars. Permissions, owner,
+parser_version, parent_source_key, visibility; each a string ≤1,000 chars.
+visibility accepts unknown (default), visible_only or complete_visible. This is a
+source coverage declaration, never proof that attachments were read, author identity
+was verified, or memory was confirmed. Omit or use unknown if coverage is uncertain. Permissions, owner,
 confirmation and model budgets are server-side, never source metadata.
 
 The repository's deterministic `pipeline.memory_center.import_adapter.prepare_imports`

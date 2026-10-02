@@ -1,5 +1,6 @@
 """Deterministic topic Markdown projections; originals and records remain authoritative."""
 import difflib
+import datetime
 import hashlib
 import json
 import os
@@ -140,10 +141,15 @@ def build_documents(store, principal, scope, query=''):
         topics=db.execute('SELECT * FROM document_topics WHERE owner=? AND scope=? ORDER BY slug',
                           (principal['owner'],scope)).fetchall()
         signature=encoded({
+            'render_date':datetime.date.today().isoformat(),
             'topics':[dict(t) for t in topics],
             'records':dict(db.execute('SELECT count(*) n,max(created) latest,sum(revision) revisions FROM records WHERE owner=? AND scope=?',(principal['owner'],scope)).fetchone()),
             'governance':dict(db.execute('SELECT count(*) n,max(g.reviewed) latest,sum(g.revision) revisions FROM record_governance g JOIN records r ON r.id=g.record_id WHERE r.owner=? AND r.scope=?',(principal['owner'],scope)).fetchone()),
             'translations':dict(db.execute('SELECT count(*) n,max(t.reviewed) latest FROM record_translations t JOIN records r ON r.id=t.record_id WHERE r.owner=? AND r.scope=?',(principal['owner'],scope)).fetchone())})
+        from .temporal import available, acknowledge
+        if available(store,db):
+            row=db.execute('SELECT generation,refreshed_generation FROM scope_projection_state WHERE owner=? AND scope=?',(principal['owner'],scope)).fetchone()
+            signature+=encoded(dict(row) if row else {})
         cache=getattr(store,'_document_cache',{}).get((principal['owner'],scope))
         if cache and cache[0]==signature:
             intact=all(Path(d['export_path']).exists() and Path(d['export_path']).stat().st_mtime_ns==stamp for d,stamp in cache[1])
@@ -207,6 +213,7 @@ def build_documents(store, principal, scope, query=''):
                     if os.path.exists(tmp):os.unlink(tmp)
             results.append({'slug':topic['slug'],'title':topic['title'],'revision':revision,'digest':digest,
                             'markdown':markdown,'changes':diff,'claims':count,'dependencies':deps,'export_path':str(target),'is_index':bool(index_projection),'category':topic.get('category') or topic['slug'].replace('history-','').split('--page-')[0]})
+        acknowledge(store,db,principal['owner'],scope)
     if not hasattr(store,'_document_cache'):store._document_cache={}
     store._document_cache[(principal['owner'],scope)]=(signature,[(d,Path(d['export_path']).stat().st_mtime_ns) for d in results])
     return [d for d in results if not query.strip() or query.casefold() in (d['title']+'\n'+d['markdown']).casefold()]

@@ -108,9 +108,8 @@ class Store:
         if policy not in ('archive', 'extract'): raise Invalid('处理策略需为 archive / extract')
         if policy == 'extract':permit_model(principal, scope)
         envelope = body.get('source_metadata', {})
-        allowed = {'original_ref', 'original_date', 'author', 'locator', 'parser_version', 'parent_source_key'}
-        if not isinstance(envelope, dict) or set(envelope) - allowed or any(not isinstance(v,str) or len(v)>1000 for v in envelope.values()):
-            raise Invalid('来源元信息无效；权限由服务端取得')
+        from .source_metadata import validate as validate_metadata
+        envelope = validate_metadata(envelope)
         if not isinstance(source_key, str) or not 1 <= len(source_key) <= 300:
             raise Invalid('source_key 必须是稳定来源标识，1–300 字符')
         if source_type not in ('conversation', 'imported_summary', 'document'):
@@ -169,6 +168,8 @@ class Store:
             if not job:
                 return False
             source = dict(db.execute('SELECT * FROM sources WHERE id=?', (job['source_id'],)).fetchone())
+            from .source_metadata import load as load_metadata
+            source['source_metadata'] = load_metadata(db, source['id'])
             external = db.execute('SELECT s.reserved_attempts,s.reserved_tokens FROM bulk_segments s JOIN bulk_batches b ON b.id=s.batch_id WHERE s.job_id=? AND b.owner=? AND b.scope=?', (job['id'],source['owner'],source['scope'])).fetchone()
             from .budget import reserve, settle
             attempt = None
@@ -193,6 +194,7 @@ class Store:
             db.execute("UPDATE jobs SET state='processing',attempts=attempts+1,lease=?,lease_until=? WHERE id=?",
                        (lease, time.time() + 180, job['id']))
             source = dict(db.execute('SELECT * FROM sources WHERE id=?', (job['source_id'],)).fetchone())
+            source['source_metadata'] = load_metadata(db, source['id'])
         usage = None
         try:
             plan, usage = model.extract_source(source) if hasattr(model,'extract_source') else model.extract(json.loads(source['payload']))
@@ -381,6 +383,11 @@ class Store:
                         'user_stated', sid, 'correction', statement, 'active', row['revision'] + 1, rid, time.time()))
             db.execute('INSERT INTO events VALUES(?,?,?,?,?,?)',
                        (uid(), newid, principal['id'], 'correction', rid, time.time()))
+            from .temporal import record as audit_change, request as temporal_request
+            from .governance import metadata
+            audit_change(self, db, principal, row['scope'], newid, rid, row['revision'] + 1,
+                         metadata({'id': newid, 'message_id': 'correction'}),
+                         'legacy-correction:' + newid, temporal_request(body))
             return {'id': newid, 'revision': row['revision'] + 1}
 
     def retry(self, principal, jid):
@@ -447,10 +454,10 @@ def validate_plan(plan, source):
         elif message['role'] == 'user' and source['trusted_user']:
             status = 'user_stated'
         from .claim_context import evidence_context, contains_immediate_command, statement_has_date
-        if source.get('processing_method_version') in ('2026-10-01.6','2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15'):
+        if source.get('processing_method_version') in ('2026-10-01.6','2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16'):
             context = evidence_context(message,source['source_type'])
             semantic_statement = c['statement']
-            if source.get('processing_method_version') in ('2026-10-01.13','2026-10-01.14','2026-10-02.15') and source['source_type']!='imported_summary':
+            if source.get('processing_method_version') in ('2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16') and source['source_type']!='imported_summary':
                 prefix = ('来源消息日期：'+context['source_date']+'（非事件成立时间，当前有效性待核实）。') if context['source_date'] else ''
                 if c['topic']=='projects' and context['conversation_title']:
                     prefix += '来源对话：'+context['conversation_title']+'。'
@@ -467,13 +474,13 @@ def validate_plan(plan, source):
                     raise Invalid('历史陈述必须保留来源日期，不能把历史要求当成当前状态')
                 if c['topic']=='projects' and context['conversation_title'] and context['conversation_title'] not in c['statement']:
                     raise Invalid('项目陈述必须保留来源对话标题，不能猜测项目身份或使用模糊指代')
-            elif source.get('processing_method_version') in ('2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15') and '原始时间未知' not in c['statement']:
+            elif source.get('processing_method_version') in ('2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16') and '原始时间未知' not in c['statement']:
                 raise Invalid('摘要更新时间不能充当事件时间，请明确原始时间未知')
             elif not c['statement'].startswith(('摘要记载','摘要主张')):
                 raise Invalid('二手摘要必须明确归属，不能升格为本人陈述')
         from .modality import evidence_modality, modality_problem
         mode = evidence_modality(c['quote'])
-        if source.get('processing_method_version') in ('2026-10-01.14','2026-10-02.15'):
+        if source.get('processing_method_version') in ('2026-10-01.14','2026-10-02.15','2026-10-02.16'):
             problem = modality_problem(c['quote'], semantic_statement, c['kind'])
             if problem:
                 raise Invalid(problem)

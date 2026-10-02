@@ -8,7 +8,7 @@ VERSION = 'memory-import-adapter-v1'
 MAX_CHARS = 24000
 MAX_MESSAGES = 100
 FIELDS = {'id', 'role', 'text', 'source_title', 'created_at'}
-META = {'original_ref', 'original_date', 'author', 'locator', 'parser_version', 'parent_source_key'}
+from .source_metadata import FIELDS as META, validate as validate_metadata
 
 
 def prepare_imports(source_key, messages, *, scope, source_type='document', source_metadata=None):
@@ -27,8 +27,7 @@ def prepare_imports(source_key, messages, *, scope, source_type='document', sour
     if source_metadata is not None and not isinstance(source_metadata, dict):
         raise Invalid('来源元信息必须是对象')
     metadata = dict(source_metadata or {})
-    if set(metadata) - META or any(not isinstance(v, str) or len(v) > 1000 for v in metadata.values()):
-        raise Invalid('来源元信息无效')
+    metadata = validate_metadata(metadata)
     if not isinstance(messages, list) or not messages:
         raise Invalid('消息列表不能为空')
     ids = set()
