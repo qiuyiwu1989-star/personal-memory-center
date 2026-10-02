@@ -1,6 +1,6 @@
 # ArkClaw 接入：先检索，再受控写入
 
-目前记忆中心后台沿用网站登录；没有自助申请 Agent Token 的界面。Agent 使用记忆中心单独颁发的 Bearer Token，而不是网站登录态或火山模型 API Key。凭据仅保存服务端哈希，原值另留私有文件；新试用凭据使用 read/source_read、单一历史 scope、trusted_user=false，30天有效，不包含 write。失效或禁用在下一次服务端配置读取时生效，既有凭据无有效期字段的行为保持兼容。配置文件为空或全部失效时拒绝认证。
+记忆中心后台沿用网站登录；本轮新增“设置 → Agent 接入”用于本人创建、查看到期与撤销 Agent Token（随本轮代码发布生效）。Agent 使用记忆中心单独颁发的 Bearer Token，而不是网站登录态或火山模型 API Key。凭据仅保存服务端哈希，原值另留私有文件；新试用凭据使用 read/source_read、单一历史 scope、trusted_user=false，30天有效，不包含 write。失效或禁用在下一次服务端配置读取时生效，既有凭据无有效期字段的行为保持兼容。配置文件为空或全部失效时拒绝认证。
 
 ## 在 ArkClaw 配置
 

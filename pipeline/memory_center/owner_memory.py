@@ -8,13 +8,11 @@ import hashlib
 import json
 import time
 from .core import Invalid, Conflict, permit, encoded, uid
-from .entities import exists
 from .governance import metadata
 
 _TOPICS={'profile','preferences','people','areas','projects','topics'}
 _KINDS={'identity','preference','relationship','decision','plan','event','claim','suggestion'}
 _BASE={'request_key','statement','topic','kind','subject','governance','explicit_confirmation'}
-_GOV={'holder','subject_id','as_of','valid_until','state','priority','note'}
 
 
 def _auth(principal,scope):
@@ -46,41 +44,19 @@ def _request(body,revision=False):
             value=body.get(field)
             if type(value) is not int or value<0:raise Invalid('需要记录与治理 revision')
             result[field]=value
+    from .judgment_contract import normalize
     gov=body.get('governance',{})
-    if not isinstance(gov,dict) or set(gov)-_GOV:raise Invalid('审核字段无效')
-    state=gov.get('state','verified' if result['explicit_confirmation'] else 'candidate')
-    if not isinstance(state,str) or state not in ('candidate','verified','historical','rejected'):raise Invalid('审核状态无效')
-    if (state=='verified') != result['explicit_confirmation']:
+    if not isinstance(gov,dict):raise Invalid('审核字段无效')
+    values=normalize(dict(gov,state=gov.get('state','verified' if result['explicit_confirmation'] else 'candidate')))
+    if (values['state']=='verified') != result['explicit_confirmation']:
         raise Invalid('verified 必须对应本次明确确认，不能从旧状态推断')
-    priority=gov.get('priority','P3')
-    if not isinstance(priority,str) or priority not in ('P0','P1','P2','P3'):raise Invalid('优先级无效')
-    values={'state':state,'priority':priority}
-    for field in ('holder','subject_id','as_of','valid_until','note'):
-        value=gov.get(field)
-        if value is not None and (not isinstance(value,str) or len(value)>(1000 if field=='note' else 160)):
-            raise Invalid('审核字段无效')
-        values[field]=value or ('' if field=='note' else None)
-    for field in ('as_of','valid_until'):
-        if values[field]:
-            try:
-                if datetime.date.fromisoformat(values[field]).isoformat()!=values[field]:
-                    raise ValueError('noncanonical date')
-            except ValueError:raise Invalid('审核日期需为 YYYY-MM-DD') from None
-    if values['as_of'] and values['valid_until'] and values['valid_until']<values['as_of']:
-        raise Invalid('失效日期不能早于成立日期')
-    if state=='verified' and any(not values[field] for field in ('holder','subject_id','as_of')):
-        raise Invalid('明确确认需重新填写主张者、稳定对象 ID 与成立日期')
     result['governance']=values
     return result
 
 
 def _verified(db,principal,scope,governance):
-    if governance['state']!='verified':return
-    today=datetime.date.today().isoformat()
-    if governance['as_of']>today or (governance['valid_until'] and governance['valid_until']<=today):
-        raise Invalid('未来或已失效陈述不可标为当前有效 verified')
-    if any(not exists(db,principal['owner'],scope,governance[field]) for field in ('holder','subject_id')):
-        raise Invalid('确认前需登记主张者与对象的稳定实体')
+    from .judgment_contract import validate_verified
+    validate_verified(db,principal['owner'],scope,governance)
 
 
 def _key(principal,scope,request,operation):

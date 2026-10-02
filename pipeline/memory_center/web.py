@@ -31,7 +31,7 @@ def load_grants(path):
     return active
 
 
-def blueprint(store, grants, model, browser_principal=None):
+def blueprint(store, grants, model, browser_principal=None, credential_manager=None):
     bp = Blueprint('memory_center', __name__, url_prefix=PREFIX)
 
     @bp.before_request
@@ -79,9 +79,25 @@ def blueprint(store, grants, model, browser_principal=None):
     def status():
         p = g.memory_principal
         return jsonify(principal=p['id'], scopes=p['scopes'], actions=p['actions'],
-                       can_correct=bool(p.get('trusted_user')), model_configured=model.configured,
+                       can_correct=bool(p.get('trusted_user')), can_manage_agents=bool(credential_manager and p.get('trusted_user') is True and 'write' in p.get('actions',[])), model_configured=model.configured,
                        mode='production' if store.dsn else 'local-pilot', storage=store.storage, automatic_replacement=False,
                        default_scope=p.get('default_scope','personal'), method_version=PROMPT_VERSION)
+
+    def credentials():
+        if credential_manager is None:raise Invalid('此环境未启用凭据管理')
+        return credential_manager
+
+    @bp.get('/agent-credentials')
+    def agent_credentials_list():
+        return jsonify(credentials().list(g.memory_principal))
+
+    @bp.post('/agent-credentials')
+    def agent_credentials_create():
+        return jsonify(credentials().create(g.memory_principal,body()))
+
+    @bp.post('/agent-credentials/<credential_id>/revoke')
+    def agent_credentials_revoke(credential_id):
+        return jsonify(credentials().revoke(g.memory_principal,credential_id))
 
     @bp.post('/sources')
     def ingest():

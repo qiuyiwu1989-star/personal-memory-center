@@ -17,9 +17,10 @@ def setup(store):
 
 def register(store,principal,scope,body):
     permit(principal,scope,'write')
-    if not principal.get('trusted_user'):raise PermissionError('仅本人可登记实体')
+    if principal.get('trusted_user') is not True:raise PermissionError('仅本人可登记实体')
     kind=body.get('kind');eid=body.get('id');name=body.get('name');aliases=body.get('aliases',[])
     if kind not in ('person','project','organization','topic') or not isinstance(eid,str) or not re.fullmatch(r'[a-z][a-z0-9:_-]{0,99}',eid):raise Invalid('实体类型或稳定 ID 无效')
+    if eid.startswith('owner:'):raise Invalid('owner: 为本人保留实体；不可重注册或改写身份')
     if not isinstance(name,str) or not name.strip() or len(name)>120 or not isinstance(aliases,list) or len(aliases)>20 or any(not isinstance(a,str) or not 1<=len(a)<=120 for a in aliases):raise Invalid('名称或别名无效')
     with store.db() as db:
         db.execute('BEGIN IMMEDIATE')

@@ -187,6 +187,7 @@
       $('method-version').textContent='v'+identity.method_version;
       $('ingest-form').hidden=!identity.actions.includes('write');
       ownerAdd.hidden=!identity.can_correct || !identity.actions.includes('write');
+      agentManage.hidden=!identity.can_manage_agents;
       $('evidence-index').hidden=!identity.actions.includes('write') || !identity.actions.includes('source_read');
       notice('');
       $('archive-tab').hidden=!identity.scopes.includes('claude:archive');
@@ -197,7 +198,7 @@
     } catch(err) {token='';identity=null;if(!['127.0.0.1','localhost'].includes(location.hostname)){notice('登录已失效，请重新登录后台。',true);const link=node('a','登录后台');link.href='/admin/login.html';$('notice').append(link);}else{$('login').hidden=false;notice(err.message,true);}}
   }
   $('login-form').addEventListener('submit',async e=>{e.preventDefault();token=$('token').value.trim();await connect();});
-  $('logout').addEventListener('click',()=>{clearInterval(timer);token='';identity=null;$('workspace').hidden=true;$('login').hidden=false;$('records').replaceChildren();$('jobs').replaceChildren();$('documents').replaceChildren();$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;$('document-reader').close();notice('已断开，页面内凭据已清除。');});
+  $('logout').addEventListener('click',()=>{clearInterval(timer);token='';identity=null;++reviewEpoch;$('review-dialog').close();$('review-content').querySelectorAll('textarea').forEach(input=>{input.value='';});$('review-content').replaceChildren();delete $('review-content').dataset.credentials;$('workspace').hidden=true;$('login').hidden=false;$('records').replaceChildren();$('jobs').replaceChildren();$('documents').replaceChildren();$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;$('document-reader').close();notice('已断开，页面内凭据已清除。');});
   $('ingest-form').addEventListener('submit',async e=>{
     e.preventDefault();const button=$('ingest-submit');button.disabled=true;
     const text=$('material').value,type=$('source-type').value,scope=$('ingest-scope').value,name=fileName;
@@ -287,8 +288,10 @@
       $('extraction-runs').append(card);
     }
   }
+  let reviewEpoch=0;
   async function reviewRun(run){
-    const data=await api('/extraction-previews/'+run.preview_id),host=$('review-content');host.replaceChildren();$('review-title').textContent=run.operation==='translate'?'核对中文译文':'比较再次提炼结果';
+    const epoch=++reviewEpoch,activeIdentity=identity,scope=$('scope').value;
+    const data=await api('/extraction-previews/'+run.preview_id);if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;const host=$('review-content');host.replaceChildren();$('review-title').textContent=run.operation==='translate'?'核对中文译文':'比较再次提炼结果';
     host.append(node('p','采用候选不会覆盖旧结论或自动核实；译文仅改变展示。','muted'));
     const form=node('form');const checks=[];
     data.changes.forEach((change,i)=>{const item=node('div',undefined,'diff-item'),label=node('label',undefined,'row'),check=node('input');check.type='checkbox';check.value=String(i);check.disabled=change.comparison==='duplicate';checks.push(check);label.append(check,node('span',({duplicate:'重复 · 无需再加入',new:'新增候选',related_needs_review:'有关联旧记录 · 需对照',translation:'中文展示译文'})[change.comparison]||change.comparison));item.append(label);
@@ -304,7 +307,8 @@
     form.addEventListener('submit',e=>{e.preventDefault();const indices=checks.filter(c=>c.checked).map(c=>Number(c.value));if(!indices.length){notice('先选择要采用的候选。',true);return;}submit('apply',indices);});discard.addEventListener('click',()=>submit('discard'));$('review-dialog').showModal();
   }
   async function reviewRecord(record){
-    const data=await api('/entities?'+new URLSearchParams({scope:$('scope').value}));const host=$('review-content');host.replaceChildren();$('review-title').textContent='核实归属与有效时间';
+    const epoch=++reviewEpoch,activeIdentity=identity,scope=$('scope').value;
+    const data=await api('/entities?'+new URLSearchParams({scope}));if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;const host=$('review-content');host.replaceChildren();$('review-title').textContent='核实归属与有效时间';
     host.append(node('p',record.display_statement||record.statement,'statement'),node('blockquote',record.quote),node('p','日期不明就保留候选；来源时间不自动当作成立时间。','muted'));
     const form=node('form'),grid=node('div',undefined,'review-grid'),fields={};
     function field(key,title,type,choices){const box=node('div'),label=node('label',title);const input=node(choices?'select':'input');input.setAttribute('aria-label',title);if(!choices)input.type=type||'text';if(choices)for(const [value,text] of choices){const o=node('option',text);o.value=value;input.append(o);}input.value=record.governance?.[key]||'';fields[key]=input;box.append(label,input);grid.append(box);}
@@ -315,10 +319,40 @@
     const registry=node('details');registry.append(node('summary','登记人物或项目（不自动合并同名人物）'));const entityForm=node('form'),eid=node('input'),name=node('input'),kind=node('select');eid.placeholder='稳定 ID，如 person:sample';eid.required=true;name.placeholder='名称';name.required=true;for(const [value,title] of [['person','人物'],['project','项目'],['organization','组织'],['topic','主题']]){const o=node('option',title);o.value=value;kind.append(o);}const add=node('button','登记实体');entityForm.append(eid,name,kind,add);registry.append(entityForm);host.append(registry);entityForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/entities',{scope:$('scope').value,id:eid.value,kind:kind.value,name:name.value,aliases:[]});$('review-dialog').close();await reviewRecord(record);}catch(err){notice(err.message,true);}});
     form.addEventListener('submit',async e=>{e.preventDefault();save.disabled=true;const body={revision:record.governance.revision};for(const [key,input] of Object.entries(fields))body[key]=input.value||null;try{await api('/records/'+record.id+'/governance',body);$('review-dialog').close();notice('审核状态已保存，来源和旧版本保留。');await refresh();}catch(err){notice(err.message,true);save.disabled=false;}});$('review-dialog').showModal();
   }
+  const agentManage=node('button','Agent 接入');agentManage.hidden=true;
+  $('refresh').after(agentManage);agentManage.addEventListener('click',()=>manageAgents().catch(err=>notice(err.message,true)));
+  async function manageAgents(){
+    const epoch=++reviewEpoch,activeIdentity=identity;const data=await api('/agent-credentials');if(identity!==activeIdentity||epoch!==reviewEpoch)return;
+    const host=$('review-content');host.replaceChildren();$('review-title').textContent='Agent 接入';
+    host.dataset.credentials='1';host.append(node('p','每个 Agent 单独凭据。读取与写入分开，原值仅创建时显示一次，撤销立即生效。','muted'));
+    const form=node('form'),label=node('input'),scope=node('select'),days=node('input'),source=node('input'),write=node('input');
+    label.placeholder='用途，例如 ArkClaw 个人记忆';label.required=true;label.maxLength=120;label.setAttribute('aria-label','凭据用途');
+    for(const v of identity.scopes){const option=node('option',v);option.value=v;scope.append(option);}if(identity.scopes.includes('personal'))scope.value='personal';scope.setAttribute('aria-label','授权范围');
+    days.type='number';days.value=30;days.min=1;days.max=90;days.required=true;days.setAttribute('aria-label','有效天数');
+    source.type='checkbox';source.style.width='auto';const sourceLabel=node('label','允许查看原文');sourceLabel.prepend(source);source.disabled=!identity.actions.includes('source_read');
+    write.type='checkbox';write.style.width='auto';const writeLabel=node('label','允许写入独立收件箱');writeLabel.prepend(write);
+    function allowedWrite(){write.disabled=!scope.value.startsWith('agent:')||!scope.value.endsWith('-inbox');if(write.disabled)write.checked=false;}scope.addEventListener('change',allowedWrite);allowedWrite();
+    const save=node('button','创建凭据','primary');form.append(label,scope,node('label','有效天数（1–90）'),days,sourceLabel,writeLabel,save);host.append(form);
+    const secretHost=node('div'),list=node('div');host.append(secretHost,list);
+    const isCurrent=()=>epoch===reviewEpoch&&identity===activeIdentity&&host.contains(form)&&$('review-dialog').open;
+    function render(rows){list.replaceChildren();if(!rows.length)list.append(node('p','尚无可管理的 Agent 凭据。','muted'));
+      for(const row of rows){const card=node('article',undefined,'record');card.append(node('h3',row.description||row.id),node('p',row.scopes.join('、')+' · '+row.actions.join(' / ')+' · '+({active:'有效',expired:'已到期',revoked:'已撤销'}[row.state]||row.state),'muted'),node('p',row.expires_at?'到期：'+new Date(row.expires_at*1000).toLocaleString():'未设置到期','muted'));
+        if(row.state==='active'){const revoke=node('button','撤销');revoke.addEventListener('click',async()=>{revoke.disabled=true;try{await api('/agent-credentials/'+encodeURIComponent(row.id)+'/revoke',{});const result=await api('/agent-credentials');if(isCurrent())render(result.credentials);}catch(err){if(isCurrent()){notice(err.message,true);revoke.disabled=false;}}});card.append(revoke);}list.append(card);}}
+    render(data.credentials);if(data.truncated)host.append(node('p','当前展示前100份；更多凭据请联系维护者。','muted'));
+    let fingerprint,requestKey;
+    form.addEventListener('submit',async e=>{e.preventDefault();secretHost.replaceChildren();const body={description:label.value,scopes:[scope.value],actions:['read'],days:Number(days.value)};if(source.checked)body.actions.push('source_read');if(write.checked)body.actions.push('write');const current=JSON.stringify(body);if(current!==fingerprint){fingerprint=current;requestKey=crypto.randomUUID();}body.request_key=requestKey;save.disabled=true;
+      try{const result=await api('/agent-credentials',body);if(!isCurrent())return;
+        if(result.token){const raw=node('textarea');raw.readOnly=true;raw.value=result.token;raw.autocomplete='off';raw.setAttribute('aria-label','新Token，仅显示一次');secretHost.append(node('p','请现在复制到 Agent 的私有认证配置。关闭后不再显示；不要放进聊天、URL或公开仓库。','muted'),raw);}else secretHost.append(node('p',result.notice||'原值不能恢复，请撤销后重新创建。','muted'));
+        const latest=await api('/agent-credentials');if(isCurrent()){render(latest.credentials);save.disabled=false;}}
+      catch(err){if(isCurrent()){notice(err.message,true);save.disabled=false;}}
+    });$('review-dialog').showModal();
+  }
+  $('review-dialog').addEventListener('cancel',()=>{++reviewEpoch;});
+  $('review-dialog').addEventListener('close',()=>{++reviewEpoch;if($('review-content').dataset.credentials){$('review-content').querySelectorAll('textarea').forEach(input=>{input.value='';});$('review-content').replaceChildren();delete $('review-content').dataset.credentials;}});
   const ownerAdd=node('button','新增本人陈述','primary');ownerAdd.hidden=true;
   $('records').before(ownerAdd);ownerAdd.addEventListener('click',()=>ownerEditor());
   function ownerEditor(record){
-    const activeIdentity=identity,scope=record?.scope||$('scope').value,host=$('review-content');
+    ++reviewEpoch;const activeIdentity=identity,scope=record?.scope||$('scope').value,host=$('review-content');
     host.replaceChildren();$('review-title').textContent=record?'补充 / 修改记忆':'新增本人陈述';
     host.append(node('p','保存为待核实候选；核实归属和有效时间后，可用「核实 / 标记」确认。旧版本与原证据保留，不调用模型。','muted'));
     const form=node('form'),grid=node('div',undefined,'review-grid'),fields={};
@@ -349,10 +383,10 @@
       catch(err){if(identity===activeIdentity&&$('scope').value===scope&&host.contains(form)&&$('review-dialog').open){notice(err.message,true);save.disabled=false;}}
     });$('review-dialog').showModal();
   }
-  $('review-close').addEventListener('click',()=>$('review-dialog').close());
+  $('review-close').addEventListener('click',()=>{++reviewEpoch;$('review-dialog').close();});
 
   function updateSpaceLabel(){ $('space-label').textContent='正在查看：'+$('scope').selectedOptions[0].textContent; }
-  $('scope').addEventListener('change',()=>{documentCategory='';documentLeaf=false;updateSpaceLabel();$('document-reader').close();});
+  $('scope').addEventListener('change',()=>{++reviewEpoch;$('review-dialog').close();documentCategory='';documentLeaf=false;updateSpaceLabel();$('document-reader').close();});
   function openDocument(title,text,markdown=false){$('reader-title').textContent=title;const host=$('reader-body');host.replaceChildren();if(!markdown){host.append(node('pre',text));}else{let front=false;for(const line of text.split('\n')){if(line==='---'){front=!front;continue;}if(front)continue;const heading=line.match(/^(#{1,3}) (.*)$/);if(heading)host.append(node('h'+heading[1].length,heading[2]));else if(line.startsWith('> '))host.append(node('blockquote',line.slice(2)));else if(line.startsWith('- '))host.append(node('p','• '+line.slice(2)));else if(line.trim())host.append(node('p',line));}}$('document-reader').showModal();}
   $('reader-close').addEventListener('click',()=>$('document-reader').close());
   $('search-form').addEventListener('submit',e=>{e.preventDefault();refresh();});['scope','history'].forEach(id=>$(id).addEventListener('change',refresh));$('refresh').addEventListener('click',refresh);

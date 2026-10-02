@@ -1,8 +1,10 @@
 """Additive governance: legacy extraction is evidence, never implicit approval."""
 import datetime
+import hashlib
 import json
 import time
 from .core import Invalid, Conflict, permit, encoded, uid
+from .judgment_contract import normalize, validate_verified
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS record_governance(
@@ -32,38 +34,23 @@ def metadata(row, stored=None):
 
 
 def review(store, principal, record_id, body):
-    if not principal.get('trusted_user'):
+    if principal.get('trusted_user') is not True:
         raise PermissionError('仅本人可核实归属和有效状态')
-    state = body.get('state')
-    if state not in ('candidate', 'verified', 'historical', 'rejected'):
+    if not isinstance(body, dict) or set(body) - (set(('revision',)) | set(('holder','subject_id','as_of','valid_until','state','priority','note'))):
+        raise Invalid('治理字段无效')
+    if type(body.get('revision')) is not int or body['revision'] < 0:
+        raise Invalid('需要有效的治理 revision')
+    if 'state' not in body:
         raise Invalid('治理状态无效')
-    priority = body.get('priority', 'P3')
-    if priority not in ('P0', 'P1', 'P2', 'P3'):
-        raise Invalid('优先级无效')
-    values = {}
-    for key in ('holder', 'subject_id', 'as_of', 'valid_until', 'note'):
-        value = body.get(key)
-        if value is not None and (not isinstance(value, str) or len(value) > (1000 if key == 'note' else 160)):
-            raise Invalid('治理字段无效')
-        values[key] = value or None
-    for key in ('as_of', 'valid_until'):
-        if values[key]:
-            try: datetime.date.fromisoformat(values[key])
-            except ValueError: raise Invalid('有效日期需为 YYYY-MM-DD') from None
-    if values['valid_until'] and values['as_of'] and values['valid_until'] < values['as_of']:
-        raise Invalid('失效时间不能早于成立时间')
-    if state == 'verified' and (not values['holder'] or not values['subject_id'] or not values['as_of']):
-        raise Invalid('核实记忆需明确主张者、对象和成立日期；未知时保留候选')
+    values = normalize({key: value for key, value in body.items() if key != 'revision'})
+    state, priority = values['state'], values['priority']
     with store.db() as db:
         db.execute('BEGIN IMMEDIATE')
         row = db.execute('SELECT * FROM records WHERE id=? AND owner=?', (record_id, principal['owner'])).fetchone()
         if not row: raise Invalid('记录不存在')
         permit(principal, row['scope'], 'write')
         if row['lifecycle'] != 'active': raise Conflict('记录已被取代')
-        if state == 'verified':
-            from .entities import exists
-            if not exists(db,row['owner'],row['scope'],values['holder']) or not exists(db,row['owner'],row['scope'],values['subject_id']):
-                raise Invalid('核实前需登记主张者和对象的稳定实体 ID')
+        validate_verified(db, row['owner'], row['scope'], values)
         old = metadata(row, db.execute('SELECT * FROM record_governance WHERE record_id=?', (record_id,)).fetchone())
         if body.get('revision') != old['revision']: raise Conflict('治理记录已变化，请刷新')
         new = old | values | dict(state=state, priority=priority, revision=old['revision']+1,
@@ -90,10 +77,19 @@ def context(store, principal, scope, query, max_chars=1600, retrieval_mode='lexi
     snapshot = store.snapshot(principal,scope,query,limit=1000000,retrieval_mode=retrieval_mode)
     from .retrieval_ranking import score_record, score_record_v3
     rows = sorted((r for r in snapshot['records'] if usable(r)),
-                  key=lambda r:(-(score_record_v3(r,query) if retrieval_mode=='lexical-v3' else score_record(r,query)),r['governance']['priority']) if query.strip() and retrieval_mode in ('lexical-v2','lexical-v3') else (0,r['governance']['priority']))
-    result = {'records': [], 'total': len(rows), 'truncated': bool(rows), 'policy': 'verified-or-owner-corrected-v1', 'retrieval':retrieval_mode}
+                  key=lambda r:(-(score_record_v3(r,query) if retrieval_mode=='lexical-v3' else score_record(r,query)),r['governance']['priority'],r['id']) if query.strip() and retrieval_mode in ('lexical-v2','lexical-v3') else (0,r['governance']['priority']) + (r['id'],))
+    # Fingerprint the full eligible result, including records omitted by the
+    # response budget. It is a change detector, not a cache/security promise.
+    versions = [{k: row.get(k) for k in ('id','statement','display_statement','source_id',
+                 'message_id','revision','governance','status','subject','source_date')} for row in rows]
+    revision = hashlib.sha256(encoded([principal['owner'],scope,query,retrieval_mode,max_chars,versions]).encode()).hexdigest()[:24]
+    result = {'scope':scope, 'context_revision':revision, 'etag':'"'+revision+'"',
+              'records': [], 'total': len(rows), 'truncated': bool(rows),
+              'policy': 'verified-or-owner-corrected-v1', 'retrieval':retrieval_mode}
+    if len(encoded(result)) > max_chars:
+        raise Invalid('读取范围或检索标识超过响应预算')
     for row in rows:
-        item = {k:row[k] for k in ('id','statement','source_id','message_id','revision','governance')}
+        item = {k:row[k] for k in ('id','statement','source_id','message_id','revision','governance','status','subject','source_date')}
         if row.get('translated'):
             item['original_statement']=item['statement'];item['statement']=row['display_statement'];item['language']='zh'
         candidate = dict(result, records=result['records']+[item], truncated=len(result['records'])+1 < len(rows))

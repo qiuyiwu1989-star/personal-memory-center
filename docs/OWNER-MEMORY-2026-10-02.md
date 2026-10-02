@@ -1,6 +1,6 @@
 # 本人陈述与人工维护切片
 
-`owner_memory.create(store, principal, scope, body)` 新增本人填写的陈述；`owner_memory.revise(store, principal, scope, record_id, body)` 统一处理文字与审核字段的不可变版本编辑。此模块只有内部 Python 接口，REST/UI 由主任务接入；不创建表，不调用模型，不进行生产写。
+`owner_memory.create(store, principal, scope, body)` 新增本人填写的陈述；`owner_memory.revise(store, principal, scope, record_id, body)` 统一处理文字与审核字段的不可变版本编辑。REST/UI 已接入：本人可新增陈述和补充/修改；本模块不创建新表、不调用模型，写操作只在本人明确操作时进行。
 
 ## 输入与权限
 

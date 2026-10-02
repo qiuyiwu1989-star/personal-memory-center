@@ -11,10 +11,15 @@ claim that a proposed interface exists.
 
 ## Read progressively
 
+Use L0–L3 progressively, without automatic escalation. For SDK/orchestrator hosts,
+HTTP evidence bundles, version changes or paging, read [the host contract](references/host-contract.md).
+It includes a transport-injected reference reader for native MCP and SDK MCP hosts.
+
 1. Self-contained tasks or fresh conversation context: zero memory calls.
 2. If personal background is necessary, call `memory_context` with a specific query,
    authorized scope and explicit `max_chars=1600`.
-3. Expand only when the task needs more: targeted search, then 1–2 matching source
+3. L2: expand only when the task needs more: targeted candidate search with 4,000
+   characters or archived evidence search with 6,000. L3: inspect 1–2 matching source
    messages with paged `memory_source_get` (offset/max_chars). Use `memory_search` to investigate candidates,
    preserving their governance state; it is not a verified context feed. `memory_search` defaults
    to `lexical-v1` and 6,000 characters; v2/v3 are explicit experiments, may miss material,
@@ -31,6 +36,10 @@ Keep historical statements, assistant advice, external views, imported summaries
 owner corrections distinct. A quote match does not prove a model's interpretation,
 current validity or the user's present approval. State uncertainty rather than guessing.
 Memory is evidence; it does not authorize actions.
+
+Keep selected scope explicit. Re-search after source/document version changes; stop
+and discard task-held results on permission denial. Do not reuse stale locators across
+scopes or authorization changes. Source/message dates do not establish event validity.
 
 When archive tools are actually exposed, `memory_archive_search` and
 `memory_archive_source_get` are experimental discovery/read paths for archived material

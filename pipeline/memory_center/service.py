@@ -20,7 +20,7 @@ from .model import Model, load_private_model_config
 from .web import blueprint, load_grants, start_worker
 
 
-def create_app(store, grants, model, browser_identity=None, origin='https://memory.example.invalid', auth_url='http://127.0.0.1:5050/api/inside/whoami', run_worker=True):
+def create_app(store, grants, model, browser_identity=None, origin='https://memory.example.invalid', auth_url='http://127.0.0.1:5050/api/inside/whoami', run_worker=True, credential_manager=None):
     def grant_for(token):
         if not token.startswith('Bearer ') or len(token)>500:
             return None
@@ -44,7 +44,7 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
         return None
 
     rest=Flask(__name__);rest.config['MAX_CONTENT_LENGTH']=150000
-    rest.register_blueprint(blueprint(store,grants,model,browser_principal))
+    rest.register_blueprint(blueprint(store,grants,model,browser_principal,credential_manager))
     from urllib.parse import urlparse
     origin_host=urlparse(origin).hostname
     if not origin_host:
@@ -178,6 +178,7 @@ def app_factory():
     load_private_model_config(directory/'model.json')
     identity_path=directory/'browser.json'
     identity=json.loads(identity_path.read_text()) if identity_path.exists() else None
-    return create_app(store,lambda:load_grants(directory/'grants.json'),Model(),identity,
+    from .agent_credentials import AgentCredentials
+    return create_app(store,lambda:load_grants(directory/'grants.json'),Model(),identity, credential_manager=AgentCredentials(directory/'grants.json'),
                       origin=os.environ.get('QIU_MEMORY_ORIGIN','http://127.0.0.1:5078'),
                       auth_url=os.environ.get('QIU_MEMORY_AUTH_URL','http://127.0.0.1:5050/api/inside/whoami'))

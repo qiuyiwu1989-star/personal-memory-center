@@ -54,11 +54,17 @@ class PilotTest(unittest.TestCase):
     def test_expired_and_future_synthetic_states_do_not_enter_context(self):
         body={'revision':0,'holder':'owner:pilot','subject_id':'owner:pilot','state':'verified',
               'as_of':'2000-01-01','valid_until':'2001-01-01','priority':'P1'}
-        review(self.store,OWNER,self.row['id'],body)
-        self.assertEqual(context(self.store,READER,SCOPE,'')['records'],[])
-        body.update(revision=1,as_of='2099-01-01',valid_until=None)
-        review(self.store,OWNER,self.row['id'],body)
-        self.assertEqual(context(self.store,READER,SCOPE,'')['records'],[])
+        # New writes reject invalid current states. Older stored rows must
+        # remain harmless without silently mutating their audit history.
+        for dates in ({'as_of':'2000-01-01','valid_until':'2001-01-01'},
+                      {'as_of':'2099-01-01','valid_until':None}):
+            body.update(dates)
+            with self.assertRaises(Invalid):review(self.store,OWNER,self.row['id'],body)
+            with self.store.db() as db:
+                db.execute('INSERT OR REPLACE INTO record_governance VALUES(?,?,?,?,?,?,?,?,?,?)',
+                           (self.row['id'],'owner:pilot','owner:pilot',body['as_of'],body['valid_until'],
+                            'verified','P1',0,'Synthetic legacy fixture',0))
+            self.assertEqual(context(self.store,READER,SCOPE,'')['records'],[])
 
     def test_agent_cannot_verify_and_other_owner_cannot_preview(self):
         with self.assertRaises(PermissionError):
