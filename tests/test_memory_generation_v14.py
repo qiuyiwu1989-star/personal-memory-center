@@ -50,6 +50,18 @@ class GenerationV14Test(unittest.TestCase):
         self.assertNotIn('statement',usage['quality_assessment']['items'][0])
         self.assertEqual(usage['method_version'],PROMPT_VERSION)
 
+    def test_quality_review_failure_preserves_provider_usage(self):
+        from pipeline.memory_center.model import ModelOutputError
+        messages=[{'id':'synthetic-review-fail','role':'user','text':'我希望合成项目长期保留原始出处。'}]
+        def respond(payload):
+            return {'claims':[{'topic':'projects','kind':'plan','subject':'synthetic-project',
+                'statement':'用户希望合成项目长期保留原始出处。',
+                'evidence_id':payload['messages'][0]['evidence_spans'][0]['evidence_id']}]}
+        with patch('pipeline.memory_center.extraction_quality.review',side_effect=RuntimeError('synthetic-private-detail')):
+            with self.assertRaises(ModelOutputError) as raised:self.invoke(messages,respond)
+        self.assertEqual(raised.exception.usage['total_tokens'],50)
+        self.assertNotIn('synthetic-private-detail',str(raised.exception))
+
     def test_new_prompt_reaches_provider_with_exact_scope_and_user_evidence(self):
         title = 'Synthetic Alpha / 范围： A  B'
         text = '我希望未来为合成项目增加离线导出；持续约束是所有导出都应保留出处。'

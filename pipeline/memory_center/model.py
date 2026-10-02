@@ -169,9 +169,13 @@ class Model:
         try:resolved=resolve_plan(plan,spans,version=PROMPT_VERSION)
         except Invalid as exc:raise ModelOutputError(str(exc),usage) from None
         from .extraction_quality import review, review_notes
-        assessment=review(resolved['claims'],source=source)
+        try:
+            assessment=review(resolved['claims'],source=source)
+            notes=review_notes(assessment,resolved['claims'])
+        except Exception as exc:
+            raise ModelOutputError('提炼质量诊断未完成：'+type(exc).__name__,usage) from None
         return resolved,dict(usage,routing=routes,
-                             quality_review_notes=review_notes(assessment,resolved['claims']),
+                             quality_review_notes=notes,
                              quality_assessment=assessment)
 
     def translate(self, statement):
