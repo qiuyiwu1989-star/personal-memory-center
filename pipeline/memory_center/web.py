@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import threading
+import time
+import math
 from flask import Blueprint, Flask, Response, g, jsonify, request, send_file
 from werkzeug.exceptions import HTTPException
 from .core import Store, Invalid, Conflict, permit, encoded
@@ -15,12 +17,18 @@ PREFIX = '/api/inside/memory-center/v1'
 
 def load_grants(path):
     grants = json.loads(Path(path).read_text())
-    if not isinstance(grants, list) or not grants:
+    if not isinstance(grants, list):
         raise Invalid('需配置独立 Agent 凭据')
+    active=[]
     for grant in grants:
         if not all(k in grant for k in ('token_sha256', 'id', 'owner', 'scopes', 'actions')):
             raise Invalid('凭据配置缺字段')
-    return grants
+        enabled=grant.get('enabled',True)
+        expires=grant.get('expires_at')
+        if type(enabled) is not bool or (expires is not None and (type(expires) not in (int,float) or not math.isfinite(expires))):
+            raise Invalid('凭据有效期配置无效')
+        if enabled and (expires is None or expires>time.time()):active.append(grant)
+    return active
 
 
 def blueprint(store, grants, model, browser_principal=None):
@@ -197,6 +205,20 @@ def blueprint(store, grants, model, browser_principal=None):
     def records():
         return jsonify(store.snapshot(g.memory_principal, request.args.get('scope', 'personal'),
                         request.args.get('q', ''), request.args.get('history') == '1', governance_filter=request.args.get('state') or None))
+
+    @bp.post('/owner-records')
+    def owner_create():
+        from .owner_memory import create
+        data=body();scope=data.pop('scope',None)
+        if not isinstance(scope,str) or not scope:raise Invalid('需要指定记忆范围')
+        return jsonify(create(store,g.memory_principal,scope,data))
+
+    @bp.post('/records/<record_id>/revise')
+    def owner_revise(record_id):
+        from .owner_memory import revise
+        data=body();scope=data.pop('scope',None)
+        if not isinstance(scope,str) or not scope:raise Invalid('需要指定记忆范围')
+        return jsonify(revise(store,g.memory_principal,scope,record_id,data))
 
     @bp.post('/records/<record_id>/governance')
     def govern(record_id):

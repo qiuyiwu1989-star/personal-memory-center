@@ -5,7 +5,7 @@
   let token = '', identity = null, timer = null, refreshing = false, pendingJobs = false;
   let documentData=[], documentCategory='', documentLeaf=false;
   let fileName='', fileRead=0, activeBatch=null, materialOffset=0;
-  const labels = {archived:'已归档',paused_budget:'等待预算',ready:'待审核',discarded:'未采用',user_stated:'本人陈述 · 模型提炼', source_reported:'来源陈述', imported_summary:'导入摘要',agent_suggested:'AI 发言 · 未经本人确认',active:'可检索',superseded:'已被纠正',received:'待整理',processing:'正在提炼',applied:'提炼完成',failed:'失败',profile:'个人',preferences:'偏好',people:'人物',areas:'领域',projects:'项目',topics:'主题'};
+  const labels = {archived:'已归档',paused_budget:'等待预算',ready:'待审核',discarded:'未采用',user_stated:'本人陈述', source_reported:'来源陈述', imported_summary:'导入摘要',agent_suggested:'AI 发言 · 未经本人确认',active:'可检索',superseded:'已被纠正',received:'待整理',processing:'正在提炼',applied:'提炼完成',failed:'失败',profile:'个人',preferences:'偏好',people:'人物',areas:'领域',projects:'项目',topics:'主题'};
   function notice(message, error=false) { $('notice').hidden=!message; $('notice').textContent=message; $('notice').dataset.error=String(error); }
   async function api(path, body) {
     const response = await fetch(prefix+path,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:'Bearer '+token}:{'X-Memory-Local':'1'}),'Content-Type':'application/json'},cache:'no-store',body:body===undefined?undefined:JSON.stringify(body)});
@@ -137,7 +137,7 @@
       if(data.truncated) $('records').append(node('p','当前展示前 100 条，请缩小搜索范围。','muted'));
       for(const r of data.records) {
         const card=node('article',undefined,'record memory-tile');card.dataset.topic=r.topic;card.dataset.status=r.status;card.dataset.lifecycle=r.lifecycle;card.dataset.governance=r.governance?.state||'candidate';card.dataset.usable=String(r.usable);
-        [labels[r.topic]||r.topic,r.message_id==='correction'?'本人明确纠正':(labels[r.status]||r.status),labels[r.lifecycle]||r.lifecycle,'v'+r.revision,...(r.source_date?[r.source_date.slice(0,10)]:[]),...(r.processing_method==='session_agent'?['会话 Agent 整理']:r.processing_method==='llm'?['后台模型提炼']:[])].forEach(t=>card.append(node('span',t,'tag')));
+        [labels[r.topic]||r.topic,r.message_id==='correction'?'本人明确纠正':(labels[r.status]||r.status),labels[r.lifecycle]||r.lifecycle,'v'+r.revision,...(r.source_date?[r.source_date.slice(0,10)]:[]),...(r.processing_method==='owner_manual'?['本人手动维护']:r.processing_method==='session_agent'?['会话 Agent 整理']:r.processing_method==='llm'?['后台模型提炼']:[])].forEach(t=>card.append(node('span',t,'tag')));
         card.append(node('p',({user:'本人',assistant:'AI 助手'}[r.subject]||r.subject),'muted'),node('p',r.display_statement||r.statement,'statement'));
         if(r.translated)card.append(node('span','中文译文 · 原文保留','tag'));
         if(r.governance){const g=r.governance;const states={candidate:'待核实候选',verified:'已核实',historical:'历史判断',rejected:'不采纳',owner_corrected:'本人纠正'};card.append(node('p',(states[g.state]||g.state)+' · '+g.priority+' · 成立时间：'+(g.as_of||'未知'),'muted'));}
@@ -147,14 +147,7 @@
         if(identity.can_correct && identity.actions.includes('write') && r.lifecycle==='active') {
           const govern=node('button','核实 / 标记');govern.addEventListener('click',()=>reviewRecord(r).catch(err=>notice(err.message,true)));card.append(govern);
           if(!r.translated && /[a-zA-Z]{4}/.test(r.statement)){const translate=node('button','生成中文译文');let requestKey;translate.addEventListener('click',async()=>{translate.disabled=true;requestKey ||= crypto.randomUUID();try{await api('/records/'+r.id+'/translate',{request_key:requestKey});notice('已进入翻译队列，原文与治理状态保持。');await refreshRuns();}catch(err){notice(err.message,true);translate.disabled=false;}});card.append(translate);}
-          const button=node('button','纠正这条理解'); button.style.marginTop='12px';
-          button.addEventListener('click',()=>{
-            button.hidden=true;
-            const form=node('form'),input=node('textarea'); input.value=r.statement;input.maxLength=2000;input.required=true;input.setAttribute('aria-label','纠正后的记忆');
-            const submit=node('button','保存新版本','primary'),cancel=node('button','取消');cancel.type='button';cancel.addEventListener('click',()=>{form.remove();button.hidden=false;});
-            form.append(input,submit,cancel);card.append(form); input.focus();
-            form.addEventListener('submit',async e=>{e.preventDefault();submit.disabled=true;try {await api('/records/'+r.id+'/correct',{statement:input.value,revision:r.revision});notice('已保存新版本，旧内容可在历史中查看。');await refresh();}catch(err){notice(err.message,true);submit.disabled=false;}});
-          });card.append(button);
+          const edit=node('button','补充 / 修改');edit.addEventListener('click',()=>ownerEditor(r));card.append(edit);
         }
         $('records').append(card);
       }
@@ -193,13 +186,14 @@
       $('model-state').textContent=identity.model_configured?'模型已配置':'模型未配置';
       $('method-version').textContent='v'+identity.method_version;
       $('ingest-form').hidden=!identity.actions.includes('write');
+      ownerAdd.hidden=!identity.can_correct || !identity.actions.includes('write');
       $('evidence-index').hidden=!identity.actions.includes('write') || !identity.actions.includes('source_read');
       notice('');
       $('archive-tab').hidden=!identity.scopes.includes('claude:archive');
       if(identity.scopes.includes('claude:archive')) await refreshArchives();
       if(identity.can_correct)await refreshMaterials(true);
       await refresh(); clearInterval(timer);
-      timer=setInterval(()=>{if(document.hidden||document.querySelector('#records textarea, #records details[open], #document-reader[open]'))return; if(pendingJobs)refresh(); if(activeBatch?.state==='running' && location.hash==='#archives')refreshArchives().catch(err=>notice(err.message,true));},8000);
+      timer=setInterval(()=>{if(document.hidden||document.querySelector('#records textarea, #records details[open], #document-reader[open], #review-dialog[open]'))return; if(pendingJobs)refresh(); if(activeBatch?.state==='running' && location.hash==='#archives')refreshArchives().catch(err=>notice(err.message,true));},8000);
     } catch(err) {token='';identity=null;if(!['127.0.0.1','localhost'].includes(location.hostname)){notice('登录已失效，请重新登录后台。',true);const link=node('a','登录后台');link.href='/admin/login.html';$('notice').append(link);}else{$('login').hidden=false;notice(err.message,true);}}
   }
   $('login-form').addEventListener('submit',async e=>{e.preventDefault();token=$('token').value.trim();await connect();});
@@ -320,6 +314,40 @@
     const save=node('button','保存审核状态','primary');form.append(grid,save);host.append(form);
     const registry=node('details');registry.append(node('summary','登记人物或项目（不自动合并同名人物）'));const entityForm=node('form'),eid=node('input'),name=node('input'),kind=node('select');eid.placeholder='稳定 ID，如 person:sample';eid.required=true;name.placeholder='名称';name.required=true;for(const [value,title] of [['person','人物'],['project','项目'],['organization','组织'],['topic','主题']]){const o=node('option',title);o.value=value;kind.append(o);}const add=node('button','登记实体');entityForm.append(eid,name,kind,add);registry.append(entityForm);host.append(registry);entityForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/entities',{scope:$('scope').value,id:eid.value,kind:kind.value,name:name.value,aliases:[]});$('review-dialog').close();await reviewRecord(record);}catch(err){notice(err.message,true);}});
     form.addEventListener('submit',async e=>{e.preventDefault();save.disabled=true;const body={revision:record.governance.revision};for(const [key,input] of Object.entries(fields))body[key]=input.value||null;try{await api('/records/'+record.id+'/governance',body);$('review-dialog').close();notice('审核状态已保存，来源和旧版本保留。');await refresh();}catch(err){notice(err.message,true);save.disabled=false;}});$('review-dialog').showModal();
+  }
+  const ownerAdd=node('button','新增本人陈述','primary');ownerAdd.hidden=true;
+  $('records').before(ownerAdd);ownerAdd.addEventListener('click',()=>ownerEditor());
+  function ownerEditor(record){
+    const activeIdentity=identity,scope=record?.scope||$('scope').value,host=$('review-content');
+    host.replaceChildren();$('review-title').textContent=record?'补充 / 修改记忆':'新增本人陈述';
+    host.append(node('p','保存为待核实候选；核实归属和有效时间后，可用「核实 / 标记」确认。旧版本与原证据保留，不调用模型。','muted'));
+    const form=node('form'),grid=node('div',undefined,'review-grid'),fields={};
+    function field(key,title,value,choices){const box=node('div'),input=node(choices?'select':key==='statement'?'textarea':'input');input.setAttribute('aria-label',title);
+      if(choices)for(const [v,t] of choices){const option=node('option',t);option.value=v;input.append(option);}
+      input.value=value||'';fields[key]=input;box.append(node('label',title),input);grid.append(box);return input;}
+    const statement=field('statement','陈述正文',record?.statement);statement.required=true;statement.maxLength=2000;
+    field('topic','主题',record?.topic||'topics',Object.entries(labels).filter(([k])=>['profile','preferences','people','areas','projects','topics'].includes(k)));
+    field('kind','类型',record?.kind||'claim',[['claim','陈述'],['identity','身份'],['preference','偏好'],['relationship','关系'],['decision','决策'],['plan','计划'],['event','事件'],['suggestion','建议']]);
+    field('subject','关于谁 / 什么',record?.subject||'未指定').maxLength=160;
+    const governanceFields={};
+    if(record){const details=node('details');details.open=true;details.append(node('summary','归属与有效时间（可修改；未知留空）'));
+      for(const [key,title] of [['holder','主张者稳定 ID'],['subject_id','对象稳定 ID'],['as_of','成立日期'],['valid_until','失效日期'],['priority','优先级'],['note','审核依据']]){
+        const box=node('div'),input=node(key==='priority'?'select':'input');input.setAttribute('aria-label',title);
+        if(key==='priority')for(const v of ['P0','P1','P2','P3']){const option=node('option',v);option.value=v;input.append(option);}
+        else input.type=['as_of','valid_until'].includes(key)?'date':'text';
+        input.value=record.governance?.[key]||(key==='priority'?'P3':'');governanceFields[key]=input;box.append(node('label',title),input);details.append(box);}
+      form.append(details);}
+    const save=node('button','保存候选','primary');form.prepend(grid);form.append(save);host.append(form);
+    let fingerprint,requestKey;
+    form.addEventListener('submit',async e=>{e.preventDefault();if(identity!==activeIdentity||$('scope').value!==scope){notice('范围或身份已变化，请重新打开编辑。',true);return;}
+      const body={scope,governance:{state:'candidate'}};
+      for(const [key,input] of Object.entries(governanceFields))body.governance[key]=input.value||null;
+      for(const [key,input] of Object.entries(fields))body[key]=input.value;
+      if(record){body.revision=record.revision;body.governance_revision=record.governance?.revision||0;}
+      const current=JSON.stringify(body);if(fingerprint!==current){fingerprint=current;requestKey=crypto.randomUUID();}body.request_key=requestKey;save.disabled=true;
+      try{await api(record?'/records/'+record.id+'/revise':'/owner-records',body);if(identity!==activeIdentity||$('scope').value!==scope||!host.contains(form)||!$('review-dialog').open)return;$('review-dialog').close();notice('候选已保存，索引自动更新；未调用模型。');await refresh();}
+      catch(err){if(identity===activeIdentity&&$('scope').value===scope&&host.contains(form)&&$('review-dialog').open){notice(err.message,true);save.disabled=false;}}
+    });$('review-dialog').showModal();
   }
   $('review-close').addEventListener('click',()=>$('review-dialog').close());
 
