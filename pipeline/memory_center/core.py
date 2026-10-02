@@ -272,10 +272,7 @@ class Store:
             governed = {r['record_id']: dict(r) for r in db.execute('SELECT g.* FROM record_governance g JOIN records r ON r.id=g.record_id WHERE r.owner=? AND r.scope=?', (principal['owner'], scope))}
         with self.db() as db:
             translations = {r['record_id']:r['text'] for r in db.execute("SELECT t.record_id,t.text FROM record_translations t JOIN records r ON r.id=t.record_id WHERE r.owner=? AND r.scope=? AND t.language='zh'", (principal['owner'],scope))}
-        from .source_index_queue import status as index_status
-        index_states={scope:index_status(self,principal,scope) for scope in {row['scope'] for row in rows}}
         for row in rows:
-            row['index_status']=index_states[row['scope']]
             row['display_statement'] = translations.get(row['id'],row['statement'])
             row['translated'] = row['id'] in translations
             row['governance'] = metadata(row, governed.get(row['id']))
@@ -290,6 +287,7 @@ class Store:
             row['modality'] = evidence_modality(row['quote'])
             usage = json.loads(row.pop('processing_usage') or 'null') or {}
             row['review_note'] = (usage.get('review_notes') or {}).get(row['statement'])
+            row['quality_note'] = (usage.get('quality_review_notes') or {}).get(row['statement'])
             row['processing_method'] = usage.get('method', 'llm' if row['message_id'] != 'correction' else 'owner_correction')
         from .retrieval_ranking import search_records
         if retrieval_mode not in ('lexical-v1','lexical-v2','lexical-v3'):raise Invalid('检索模式无效')
@@ -328,7 +326,10 @@ class Store:
                 '(SELECT count(*) FROM records r WHERE r.source_id=s.id) AS claim_count '
                 'FROM sources s LEFT JOIN jobs j ON j.source_id=s.id WHERE '+where+
                 ' ORDER BY s.created DESC LIMIT ? OFFSET ?',params+(limit,offset))]
+        from .source_index_queue import status as index_status
+        index_states={scope:index_status(self,principal,scope) for scope in {row['scope'] for row in rows}}
         for row in rows:
+            row['index_status']=index_states[row['scope']]
             messages=json.loads(row.pop('payload'))
             row['title']=messages[0].get('source_title') or row['source_key'] if messages else row['source_key']
             row['preview']=' '.join(m['text'] for m in messages)[:180]

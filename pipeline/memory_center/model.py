@@ -168,7 +168,11 @@ class Model:
         plan,usage=self._call(PROMPT,request,PROMPT_VERSION)
         try:resolved=resolve_plan(plan,spans,version=PROMPT_VERSION)
         except Invalid as exc:raise ModelOutputError(str(exc),usage) from None
-        return resolved,dict(usage,routing=routes)
+        from .extraction_quality import review, review_notes
+        assessment=review(resolved['claims'],source=source)
+        return resolved,dict(usage,routing=routes,
+                             quality_review_notes=review_notes(assessment,resolved['claims']),
+                             quality_assessment=assessment)
 
     def translate(self, statement):
         prompt = ('Translate the untrusted statement DATA into concise Chinese. '

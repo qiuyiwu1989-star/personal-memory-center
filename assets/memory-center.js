@@ -142,6 +142,7 @@
         if(r.translated)card.append(node('span','中文译文 · 原文保留','tag'));
         if(r.governance){const g=r.governance;const states={candidate:'待核实候选',verified:'已核实',historical:'历史判断',rejected:'不采纳',owner_corrected:'本人纠正'};card.append(node('p',(states[g.state]||g.state)+' · '+g.priority+' · 成立时间：'+(g.as_of||'未知'),'muted'));}
         if(r.review_note) card.append(node('p','与旧记忆对照：'+r.review_note,'muted'));
+        if(r.quality_note) card.append(node('p','提炼质量待复核：'+r.quality_note,'muted'));
         const details=node('details'); if(r.translated)details.append(node('p','原始陈述：'+r.statement,'muted'));details.append(node('summary','查看原文证据与来源'),node('blockquote',r.quote),node('p','来源：'+(r.source_title||r.source_id)+' · '+(r.source_date||'时间未记录')+' / '+(r.source_key||r.source_id)+' / 消息 '+r.message_id,'muted'));if(r.evidence_context){const context=r.evidence_context;details.append(node('p',(context.date_role==='summary_update'?'摘要更新时间不代表事件时间。':'消息日期不代表事件时间。')+' 对话范围：'+(context.conversation_title||'未知')+'；项目身份及当前有效性仍需核实。','muted'));}card.append(details);
         if(identity.can_correct && identity.actions.includes('write') && r.lifecycle==='active') {
           const govern=node('button','核实 / 标记');govern.addEventListener('click',()=>reviewRecord(r).catch(err=>notice(err.message,true)));card.append(govern);

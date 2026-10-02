@@ -36,6 +36,20 @@ class GenerationV14Test(unittest.TestCase):
             })
         return result, captured
 
+    def test_quality_review_is_persistable_metadata_without_adoption(self):
+        messages=[{'id':'synthetic-review','role':'user','text':'我的合成项目名叫 Atlas；希望未来支持离线查询。'}]
+        def respond(payload):
+            return {'claims':[{'topic':'projects','kind':'plan','subject':'synthetic-project',
+                'statement':'用户的合成项目名叫 Atlas，用户希望未来支持离线查询。',
+                'evidence_id':payload['messages'][0]['evidence_spans'][0]['evidence_id']}]}
+        (plan,usage),calls=self.invoke(messages,respond)
+        self.assertEqual(len(calls),1)
+        self.assertEqual(len(plan['claims']),1)
+        self.assertFalse(usage['quality_assessment']['quality_approved'])
+        self.assertIn(plan['claims'][0]['statement'],usage['quality_review_notes'])
+        self.assertNotIn('statement',usage['quality_assessment']['items'][0])
+        self.assertEqual(usage['method_version'],PROMPT_VERSION)
+
     def test_new_prompt_reaches_provider_with_exact_scope_and_user_evidence(self):
         title = 'Synthetic Alpha / 范围： A  B'
         text = '我希望未来为合成项目增加离线导出；持续约束是所有导出都应保留出处。'

@@ -35,6 +35,17 @@ class IndexQueueIntegrationTests(unittest.TestCase):
         with self.store.db() as db:
             for name in ('sources','jobs','source_envelopes','scope_index_queue'):
                 self.assertEqual(db.execute('SELECT count(*) n FROM '+name).fetchone()['n'],0)
+
+    def test_workbench_materials_separate_index_and_extraction_state(self):
+        self.store.ingest(self.p,self.body)
+        owner=dict(self.p,trusted_user=True)
+        first=self.store.materials(owner)['materials'][0]
+        self.assertEqual(first['state'],'archived')
+        self.assertEqual(first['index_status']['state'],'pending')
+        queue.work_once(self.store,debounce_seconds=0)
+        ready=self.store.materials(owner)['materials'][0]
+        self.assertEqual(ready['state'],'archived')
+        self.assertEqual(ready['index_status']['state'],'ready')
     def test_postgres_adapter_maps_claim_lock_to_transaction_lock(self):
         class FakePG:
             def __init__(self):self.calls=[]
