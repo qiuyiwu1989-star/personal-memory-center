@@ -201,7 +201,7 @@
   $('logout').addEventListener('click',()=>{clearInterval(timer);token='';identity=null;++reviewEpoch;$('review-dialog').close();$('review-content').querySelectorAll('textarea').forEach(input=>{input.value='';});$('review-content').replaceChildren();delete $('review-content').dataset.credentials;$('workspace').hidden=true;$('login').hidden=false;$('records').replaceChildren();$('jobs').replaceChildren();$('documents').replaceChildren();$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;$('document-reader').close();notice('已断开，页面内凭据已清除。');});
   $('ingest-form').addEventListener('submit',async e=>{
     e.preventDefault();const button=$('ingest-submit');button.disabled=true;
-    const text=$('material').value,type=$('source-type').value,scope=$('ingest-scope').value,name=fileName;
+    const text=$('material').value,type=$('source-type').value,scope=$('ingest-scope').value,name=fileName,visibility=$('source-visibility')?.value||'unknown';
     let accepted=0;
     try{
       const parts=MemoryFiles.split(text);$('material').readOnly=true;
@@ -209,7 +209,9 @@
       const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(b=>b.toString(16).padStart(2,'0')).join('');
       let duplicates=0;
       for(let i=0;i<parts.length;i++){
-        const result=await api('/sources',{scope,source_type:type,processing_policy:$('processing-policy').value,source_metadata:{parser_version:'utf8-text-v1',parent_source_key:'workbench:file:'+digest,locator:'part:'+String(i+1)},source_key:'workbench:text:'+digest+(parts.length>1?':part:'+String(i+1):''),messages:[{id:'1',role:type==='conversation'?'user':'external',text:parts[i],source_title:(name||'工作台提交')+(parts.length>1?' · 第 '+(i+1)+'/'+parts.length+' 段':'')}]});
+        const metadata={parser_version:'utf8-text-v1',parent_source_key:'workbench:file:'+digest,locator:'part:'+String(i+1)};
+        if(visibility!=='unknown')metadata.visibility=visibility;
+        const result=await api('/sources',{scope,source_type:type,processing_policy:$('processing-policy').value,source_metadata:metadata,source_key:'workbench:text:'+digest+(parts.length>1?':part:'+String(i+1):''),messages:[{id:'1',role:type==='conversation'?'user':'external',text:parts[i],source_title:(name||'工作台提交')+(parts.length>1?' · 第 '+(i+1)+'/'+parts.length+' 段':'')}]});
         accepted++;if(result.duplicate)duplicates++;
         $('file-state').textContent='已提交 '+accepted+'/'+parts.length+' 段；原文没有截断。';
       }
@@ -259,12 +261,21 @@
   async function refreshOverview(){
     const scope=$('scope').value,data=await api('/overview?'+new URLSearchParams({scope}));
     if(scope!==$('scope').value)return;
-    $('memory-overview').replaceChildren();
+    $('memory-overview').replaceChildren();renderProjection(data.projection);
     const stages=[['sources','原始资料','保留原文','ingest'],['candidates','待核实','抽取不等于事实','records'],['usable','可用记忆','按任务提供给 Agent','records'],['historical','历史变化','更正与旧判断可回查','records']];
     for(const [key,title,help,view] of stages){
       const box=node('button',undefined,'stage-card');box.dataset.stage=key;box.append(node('span',title),node('strong',String(data[key])),node('span',help));
       box.addEventListener('click',()=>{location.hash=view;showView();if(view==='records'){$('record-governance').value=key==='candidates'?'candidate':key==='usable'?'usable':'history';if(key==='historical')$('history').checked=true;refresh();}});$('memory-overview').append(box);
     }
+  }
+  function renderProjection(projection){
+    const host=$('projection-status');if(!host)return;host.hidden=!projection;if(!projection)return;
+    let text='主题文档刷新状态未知。';
+    if(projection.state==='unavailable')text='纠正时间审计尚未接入，暂不能跟踪主题文档刷新。';
+    else if(projection.state==='untracked')text='尚无可追踪的本人修改；旧资料刷新状态未知。';
+    else if(projection.stale===true)text='本人修改后的主题文档待刷新。';
+    else if(projection.state==='ready'&&projection.stale===false&&projection.coverage==='since-migration-only')text='接入时间审计后的本人修改，主题文档已刷新。';
+    host.textContent=text+' 仅跟踪接入后的本人修改，不表示其他 Agent 的旧缓存已更新。';
   }
   async function refreshBudget(){
     const scope=$('scope').value,b=await api('/budget?'+new URLSearchParams({scope}));if(scope!==$('scope').value)return;
@@ -306,6 +317,20 @@
     async function submit(action,indices){accept.disabled=true;discard.disabled=true;try{await api('/extraction-runs/'+run.id+'/control',{action,indices});$('review-dialog').close();await refresh();}catch(err){notice(err.message,true);accept.disabled=false;discard.disabled=false;}}
     form.addEventListener('submit',e=>{e.preventDefault();const indices=checks.filter(c=>c.checked).map(c=>Number(c.value));if(!indices.length){notice('先选择要采用的候选。',true);return;}submit('apply',indices);});discard.addEventListener('click',()=>submit('discard'));$('review-dialog').showModal();
   }
+  function changeFields(host,{existing=false,owner=false}={}){
+    const box=node('div'),kind=node('select');kind.setAttribute('aria-label','此次变化类型（可选）');
+    const choices=[['','未指定 · 保持原流程'],['metadata_update','补充或调整归属 / 时间'],['evidence_update','补充证据'],['interpretation_correction','纠正系统理解']];
+    if(existing)choices.push(['viewpoint_change','我的观点改变'],['withdrawal','撤回记录（需明确设为不采纳）']);
+    for(const [value,title] of choices){const option=node('option',title);option.value=value;kind.append(option);}
+    kind.value='';box.append(node('label','此次变化类型（可选）'),kind);host.append(box);
+    const endBox=node('div'),end=node('input');end.type='date';end.setAttribute('aria-label','旧观点事实失效日期（可空）');endBox.hidden=true;
+    endBox.append(node('label','旧观点事实失效日期（可空）'),end,node('p','只在明确观点改变时填写；不是记录或保存时间。未知留空，不自动填今天。','muted'));if(existing)host.append(endBox);
+    const withdrawalBox=node('div'),confirm=node('input');confirm.type='checkbox';confirm.setAttribute('aria-label','确认将治理状态设为不采纳');withdrawalBox.hidden=true;
+    withdrawalBox.append(confirm,node('span','确认将治理状态设为不采纳；该判断退出可信上下文，旧版本保留。'));if(existing&&owner)host.append(withdrawalBox);
+    host.append(node('p','未指定时沿用原流程；指定变化类型需要服务器支持纠正时间审计。','muted'));
+    kind.addEventListener('change',()=>{endBox.hidden=kind.value!=='viewpoint_change';if(endBox.hidden)end.value='';withdrawalBox.hidden=kind.value!=='withdrawal';confirm.checked=false;});
+    return {apply(body){if(!choices.some(([value])=>value===kind.value))throw new Error('新增陈述不能改变或撤回旧观点');if(kind.value==='withdrawal'){if(owner){if(!confirm.checked)throw new Error('请明确确认将治理状态设为不采纳');body.governance.state='rejected';}else if(body.state!=='rejected')throw new Error('撤回记录需将治理状态明确设为不采纳');}if(kind.value)body.change_kind=kind.value;if(kind.value==='viewpoint_change'&&end.value)body.previous_valid_until=end.value;}};
+  }
   async function reviewRecord(record){
     const epoch=++reviewEpoch,activeIdentity=identity,scope=$('scope').value;
     const data=await api('/entities?'+new URLSearchParams({scope}));if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;const host=$('review-content');host.replaceChildren();$('review-title').textContent='核实归属与有效时间';
@@ -315,9 +340,9 @@
     field('state','治理状态',null,[['candidate','待核实'],['verified','已核实'],['historical','历史判断'],['rejected','不采纳']]);
     field('priority','保存优先级',null,[['P0','P0 · 身份与重要更正'],['P1','P1 · 关系与关键决策'],['P2','P2 · 持续偏好'],['P3','P3 · 档案与讨论']]);
     const entities=[['','未知'],...data.entities.map(e=>[e.id,e.name+' · '+e.id])];field('holder','谁认为',null,entities);field('subject_id','关于谁 / 什么',null,entities);field('as_of','何时成立','date');field('valid_until','何时失效（可空）','date');field('note','审核依据','text');
-    const save=node('button','保存审核状态','primary');form.append(grid,save);host.append(form);
+    const change=changeFields(grid,{existing:true});const save=node('button','保存审核状态','primary');form.append(grid,save);host.append(form);
     const registry=node('details');registry.append(node('summary','登记人物或项目（不自动合并同名人物）'));const entityForm=node('form'),eid=node('input'),name=node('input'),kind=node('select');eid.placeholder='稳定 ID，如 person:sample';eid.required=true;name.placeholder='名称';name.required=true;for(const [value,title] of [['person','人物'],['project','项目'],['organization','组织'],['topic','主题']]){const o=node('option',title);o.value=value;kind.append(o);}const add=node('button','登记实体');entityForm.append(eid,name,kind,add);registry.append(entityForm);host.append(registry);entityForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/entities',{scope:$('scope').value,id:eid.value,kind:kind.value,name:name.value,aliases:[]});$('review-dialog').close();await reviewRecord(record);}catch(err){notice(err.message,true);}});
-    form.addEventListener('submit',async e=>{e.preventDefault();save.disabled=true;const body={revision:record.governance.revision};for(const [key,input] of Object.entries(fields))body[key]=input.value||null;try{await api('/records/'+record.id+'/governance',body);$('review-dialog').close();notice('审核状态已保存，来源和旧版本保留。');await refresh();}catch(err){notice(err.message,true);save.disabled=false;}});$('review-dialog').showModal();
+    form.addEventListener('submit',async e=>{e.preventDefault();if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value){notice('范围或身份已变化，请重新打开审核。',true);return;}save.disabled=true;const body={revision:record.governance.revision};for(const [key,input] of Object.entries(fields))body[key]=input.value||null;try{change.apply(body);await api('/records/'+record.id+'/governance',body);if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;$('review-dialog').close();notice('审核状态已保存，来源和旧版本保留。');await refresh();}catch(err){if(epoch===reviewEpoch&&identity===activeIdentity&&scope===$('scope').value){notice(err.message,true);save.disabled=false;}}});$('review-dialog').showModal();
   }
   const agentManage=node('button','Agent 接入');agentManage.hidden=true;
   $('refresh').after(agentManage);agentManage.addEventListener('click',()=>manageAgents().catch(err=>notice(err.message,true)));
@@ -372,15 +397,16 @@
         else input.type=['as_of','valid_until'].includes(key)?'date':'text';
         input.value=record.governance?.[key]||(key==='priority'?'P3':'');governanceFields[key]=input;box.append(node('label',title),input);details.append(box);}
       form.append(details);}
-    const save=node('button','保存候选','primary');form.prepend(grid);form.append(save);host.append(form);
+    const change=changeFields(grid,{existing:!!record,owner:true});const save=node('button','保存候选','primary');form.prepend(grid);form.append(save);host.append(form);
     let fingerprint,requestKey;
     form.addEventListener('submit',async e=>{e.preventDefault();if(identity!==activeIdentity||$('scope').value!==scope){notice('范围或身份已变化，请重新打开编辑。',true);return;}
       const body={scope,governance:{state:'candidate'}};
       for(const [key,input] of Object.entries(governanceFields))body.governance[key]=input.value||null;
       for(const [key,input] of Object.entries(fields))body[key]=input.value;
+      try{change.apply(body);}catch(err){notice(err.message,true);return;}
       if(record){body.revision=record.revision;body.governance_revision=record.governance?.revision||0;}
       const current=JSON.stringify(body);if(fingerprint!==current){fingerprint=current;requestKey=crypto.randomUUID();}body.request_key=requestKey;save.disabled=true;
-      try{await api(record?'/records/'+record.id+'/revise':'/owner-records',body);if(identity!==activeIdentity||$('scope').value!==scope||!host.contains(form)||!$('review-dialog').open)return;$('review-dialog').close();notice('候选已保存，索引自动更新；未调用模型。');await refresh();}
+      try{await api(record?'/records/'+record.id+'/revise':'/owner-records',body);if(identity!==activeIdentity||$('scope').value!==scope||!host.contains(form)||!$('review-dialog').open)return;$('review-dialog').close();notice(body.governance.state==='rejected'?'已设为不采纳，旧版本保留；未调用模型。':'候选已保存，索引自动更新；未调用模型。');await refresh();}
       catch(err){if(identity===activeIdentity&&$('scope').value===scope&&host.contains(form)&&$('review-dialog').open){notice(err.message,true);save.disabled=false;}}
     });$('review-dialog').showModal();
   }

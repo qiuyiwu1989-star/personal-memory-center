@@ -48,6 +48,9 @@ def record(store,db,principal,scope,rid,previous,record_revision,governance,requ
             raise Invalid('纠正时间审计需要先应用独立的 007 迁移')
         return False
     now=now if now is not None else time.time()
+    # Explicit old fact-period end requires an actual previous version.
+    if change['previous_valid_until'] and not previous:
+        raise Invalid('新增判断没有旧版本，不能填写旧判断失效日期')
     # Explicit old fact-period end is audited, never inferred from system time.
     if change['previous_valid_until'] and previous:
         old=previous_governance if previous_governance is not None else db.execute('SELECT g.as_of FROM record_governance g JOIN records r ON r.id=g.record_id '

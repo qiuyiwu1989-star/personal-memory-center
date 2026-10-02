@@ -160,6 +160,7 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
     @bp.get('/overview')
     def overview():
         from .governance import usable
+        from .temporal import status as projection_status
         p=g.memory_principal;scope=request.args.get('scope','personal');permit(p,scope,'read')
         snapshot=store.snapshot(p,scope,history=True,limit=1000000)
         active=[r for r in snapshot['records'] if r['lifecycle']=='active']
@@ -169,7 +170,8 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
         return jsonify(sources=sources,records=len(active),usable=sum(usable(r) for r in active),
                        candidates=sum(r['governance']['state']=='candidate' for r in active),
                        historical=sum(r['governance']['state']=='historical' or r['lifecycle']!='active' for r in snapshot['records']),
-                       rejected=sum(r['governance']['state']=='rejected' for r in active),jobs=tasks)
+                       rejected=sum(r['governance']['state']=='rejected' for r in active),jobs=tasks,
+                       projection=projection_status(store,p,scope))
 
     @bp.get('/budget')
     def budget_status():

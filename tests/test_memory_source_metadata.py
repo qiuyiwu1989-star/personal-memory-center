@@ -53,3 +53,29 @@ class MetadataTest(unittest.TestCase):
         self.assertEqual(event['record_id'],result['id'])
         self.assertEqual(event['previous_record_id'],row['id'])
         self.assertIsNone(event['valid_from'])
+
+    def test_overview_scope_status_never_treats_unknown_as_ready(self):
+        endpoint=self.prefix+'/overview?scope=personal'
+        response=self.client.get(endpoint,headers=self.headers)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json['projection']['state'],'unavailable')
+        self.assertIsNone(response.json['projection']['stale'])
+        temporal.setup(self.store)
+        self.assertEqual(self.client.get(endpoint,headers=self.headers).json['projection']['state'],'untracked')
+        self.assertEqual(self.client.get(self.prefix+'/overview?scope=unauthorized',headers=self.headers).status_code,403)
+
+    def test_creation_cannot_supply_previous_fact_end(self):
+        from pipeline.memory_center import owner_memory
+        temporal.setup(self.store)
+        with self.assertRaises(Invalid):owner_memory.create(self.store,self.owner,'personal',
+            {'request_key':'synthetic-no-previous','statement':'Synthetic statement','governance':{},
+             'change_kind':'viewpoint_change','previous_valid_until':'2001-01-01'})
+        self.assertEqual(self.store.snapshot(self.owner,'personal')['records'],[])
+
+    def test_split_adapter_retains_declaration_on_every_chunk(self):
+        parts=prepare_imports('synthetic:large',[{'id':'m1','role':'external','text':'合成正文。'*6000}],
+                              scope='personal',source_metadata={'visibility':'visible_only'})
+        self.assertGreater(len(parts),1)
+        for part in parts:self.assertEqual(part['source_metadata']['visibility'],'visible_only')
+        with self.assertRaises(Invalid):prepare_imports('synthetic:bad',[{'id':'m1','role':'external','text':'synthetic'}],
+                              scope='personal',source_metadata={'visibility':'verified_complete'})
