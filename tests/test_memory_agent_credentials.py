@@ -45,6 +45,27 @@ class CredentialTests(unittest.TestCase):
         for extra in ({'trusted_user':True},{'days':True},{'days':0},{'days':91},{'actions':['read','approve']}):
             with self.assertRaises(Invalid):self.manager.create(self.p,self.body|extra)
 
+    def test_new_grants_are_archive_only_and_legacy_summary_explicit(self):
+        self.assertTrue(self.manager.create(self.p,self.body)['credential']['archive_only'])
+        self.assertTrue(load_grants(self.path)[0]['archive_only'])
+        for value in (False,1,'true',None):
+            with self.assertRaises(Invalid):self.manager.create(self.p,self.body|{'archive_only':value})
+        rows=json.loads(self.path.read_text());rows[0].pop('archive_only')
+        spec={k:rows[0][k] for k in ('description','scopes','actions','days')}
+        rows[0]['request_digest']=hashlib.sha256(json.dumps(spec,sort_keys=True).encode()).hexdigest()
+        self.path.write_text(json.dumps(rows))
+        self.assertFalse(self.manager.list(self.p)['credentials'][0]['archive_only'])
+        self.assertTrue(self.manager.create(self.p,self.body)['duplicate'])
+        self.assertFalse(self.manager.create(self.p,self.body)['credential']['archive_only'])
+        self.assertNotIn('archive_only',load_grants(self.path)[0])
+
+    def test_malformed_grant_cost_flag_is_rejected(self):
+        self.manager.create(self.p,self.body)
+        rows=json.loads(self.path.read_text())
+        for value in ('false',None,0,1,[]):
+            rows[0]['archive_only']=value;self.path.write_text(json.dumps(rows))
+            with self.assertRaises(Invalid):load_grants(self.path)
+
     def test_concurrent_same_request_key_persists_once_and_returns_one_secret(self):
         # Independent manager instances simulate separate server handlers;
         # flock must coordinate their read/modify/atomic-save transaction.

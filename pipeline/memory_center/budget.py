@@ -4,7 +4,7 @@ Legacy bulk jobs retain their existing reservation authority. Missing usage or a
 crashed call keeps its reservation; it is never counted as a free request.
 """
 import time
-from .core import Invalid, permit, encoded, uid
+from .core import permit_model, Invalid, permit, encoded, uid
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS model_budgets(
@@ -28,6 +28,7 @@ def setup(store):
 def configure(store, principal, scope, body):
     permit(principal,scope,'write')
     if not principal.get('trusted_user'): raise PermissionError('仅本人可设置模型预算')
+    permit_model(principal,scope)
     cap=body.get('token_limit');quality=body.get('quality_approved',False);note=body.get('note','')
     if type(cap) is not int or not 0<=cap<=100_000_000 or type(quality) is not bool:
         raise Invalid('预算需在 0–100,000,000 tokens 之间')

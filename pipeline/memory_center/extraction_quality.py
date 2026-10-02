@@ -4,10 +4,22 @@ import json
 import re
 from .modality import CONDITION, WISH, PLAN, evidence_ranges
 
-QUALITY_POLICY_VERSION='extraction-quality-review-v1'
+QUALITY_POLICY_VERSION='extraction-quality-review-v2'
 FACT_SIGNAL=re.compile(r'名叫|叫做|命名为|名称(?:为|是)|已(?:经)?(?:完成|部署|采用)|\b(?:named|called|completed|deployed)\b',re.I)
 TASK_SIGNAL=re.compile(r'(?:请|帮我|麻烦|用户(?:请求|要求)|\b(?:please|requests?)\b).{0,24}(?:调研|比较|评估|总结|生成|整理|写一|画一|research|compare|evaluate|summarize|generate)',re.I)
 ENDURING_SIGNAL=re.compile(r'长期|持续|每次|始终|必须|不得|禁止|约束|\b(?:always|ongoing|must|never)\b',re.I)
+
+# Signals intentionally cannot determine the true speaker or entailment.
+QUOTED_ACCOUNT=re.compile(r'(?:以下|下面|转发|收到).{0,32}(?:来信|信件|邮件|访谈|自述)|(?:老师|同事|朋友).{0,24}(?:写道|来信|发来|说：)|\b(?:letter|email|account)\s+from\b',re.I)
+SELF_RESOURCE=re.compile(r'(?:我|我们)(?:已经|目前)?(?:拥有|持有|有一个域名|有一座|任职|担任)|\bI\s+(?:have|own)\s+(?:(?:a|the|an)\s+)?(?:domain|studio|business|patent)\b',re.I)
+QUESTION=re.compile(r'[?？]|怎么|如何|\b(?:how|what should)\b',re.I)
+
+
+def _messages(source):
+    if not source:return []
+    payload=source.get('payload',source.get('messages',[]))
+    messages=json.loads(payload) if isinstance(payload,str) else payload
+    return messages if isinstance(messages,list) else []
 
 
 def _semantic(claim, source=None):
@@ -53,10 +65,20 @@ def review(claims, source=None):
     if not isinstance(claims,list) or any(not isinstance(c,dict) or not isinstance(c.get('statement'),str) or not isinstance(c.get('quote'),str) for c in claims):
         raise ValueError('quality review requires resolved claims with statement and quote')
     items=[];seen={};previous=[]
+    messages=_messages(source)
+    message_by_id={m.get("id"):m for m in messages if isinstance(m,dict)}
     for index,claim in enumerate(claims):
         text=_semantic(claim,source);quote=claim['quote'];findings=[]
         def flag(code,explanation,**metadata):
             findings.append({'code':code,'explanation':explanation,'signal_only':True,**metadata})
+        message=message_by_id.get(claim.get('message_id'),{})
+        source_text=message.get('text',quote)
+        if QUOTED_ACCOUNT.search(source_text) and re.search(r'用户|本人|\buser\b',text,re.I):
+            flag('nested_speaker_review','来源含第三方来信或自述信号，陈述提及用户；需逐个子句核对引文内说话者，外层用户角色不证明本人归属。')
+        # Enumerations are particularly easy to over-summarize across spans.
+        # This is a coverage review request, not lexical proof of unsupportedness.
+        if len(re.findall(r'[、；;]',text))>=2:
+            flag('enumerated_coverage_review','陈述列举多个成分；需逐项核查均由同一所选证据支持，标题或相邻片段不能补证。')
         if CONDITION.search(quote) and not CONDITION.search(text):
             flag('condition_scope_review','证据含条件，陈述未检测到条件标记；需核对条件是否约束本条，不能仅凭词法认定遗漏。')
         if (WISH.search(text) or PLAN.search(text)) and FACT_SIGNAL.search(text):
@@ -83,7 +105,18 @@ def review(claims, source=None):
         items.append({'claim_index':index,'disposition':disposition,'findings':findings[:6],
                       'codes':[f['code'] for f in findings[:6]],
                       'semantics_verified':False})
+    source_signals=[]
+    represented={c.get('message_id') for c in claims}
+    for message_index,message in enumerate(messages):
+        if not isinstance(message,dict) or message.get('role')!='user':continue
+        text=message.get('text','')
+        if (isinstance(text,str) and SELF_RESOURCE.search(text) and QUESTION.search(text)
+                and not QUOTED_ACCOUNT.search(text) and message.get('id') not in represented):
+            source_signals.append({'message_index':message_index,'code':'historical_self_report_review',
+                'explanation':'未产生候选的用户消息含资源或角色自述及临时问题信号；需核查是否遗漏独立历史事实，不证明本人归属或当前有效性。',
+                'signal_only':True})
     return {'quality_policy_version':QUALITY_POLICY_VERSION,
+        'source_signals':source_signals[:32],
         'quality_approved':False,'semantics_verified':False,
         'items':items,'total':len(items),
         'review_required':sum(i['disposition']=='review_required' for i in items),

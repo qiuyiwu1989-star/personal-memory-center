@@ -23,6 +23,8 @@ def load_grants(path):
     for grant in grants:
         if not all(k in grant for k in ('token_sha256', 'id', 'owner', 'scopes', 'actions')):
             raise Invalid('凭据配置缺字段')
+        if 'archive_only' in grant and type(grant['archive_only']) is not bool:
+            raise Invalid('凭据归档限制必须为布尔值')
         enabled=grant.get('enabled',True)
         expires=grant.get('expires_at')
         if type(enabled) is not bool or (expires is not None and (type(expires) not in (int,float) or not math.isfinite(expires))):

@@ -104,8 +104,9 @@ class Store:
         messages = body.get('messages')
         source_key = body.get('source_key')
         source_type = body.get('source_type', 'conversation')
-        policy = body.get('processing_policy', 'extract')
+        policy = body.get('processing_policy', 'archive' if principal.get('archive_only',False) is not False else 'extract')
         if policy not in ('archive', 'extract'): raise Invalid('处理策略需为 archive / extract')
+        if policy == 'extract':permit_model(principal, scope)
         envelope = body.get('source_metadata', {})
         allowed = {'original_ref', 'original_date', 'author', 'locator', 'parser_version', 'parent_source_key'}
         if not isinstance(envelope, dict) or set(envelope) - allowed or any(not isinstance(v,str) or len(v)>1000 for v in envelope.values()):
@@ -390,6 +391,7 @@ class Store:
             if not row:
                 raise Invalid('任务不存在')
             permit(principal, row['scope'], 'write')
+            permit_model(principal, row['scope'])
             if row['state'] != 'failed':
                 raise Conflict('只有失败任务可以重试')
             db.execute("UPDATE jobs SET state='received',error=NULL WHERE id=?", (jid,))
@@ -398,6 +400,17 @@ class Store:
 def permit(principal, scope, action):
     if scope not in principal.get('scopes', []) or action not in principal.get('actions', []):
         raise PermissionError('该凭据无此范围的权限')
+
+
+def permit_model(principal, scope):
+    """Model dispatch capability, compatible with legacy grants without flag.
+
+    New Agent grants are archive-only. No request body can override this
+    server-side principal constraint; malformed flags fail closed as well.
+    """
+    permit(principal, scope, 'write')
+    if principal.get('archive_only', False) is not False:
+        raise PermissionError('该凭据仅允许归档，不允许模型提炼、翻译或重试')
 
 
 def validate_plan(plan, source):
@@ -434,10 +447,10 @@ def validate_plan(plan, source):
         elif message['role'] == 'user' and source['trusted_user']:
             status = 'user_stated'
         from .claim_context import evidence_context, contains_immediate_command, statement_has_date
-        if source.get('processing_method_version') in ('2026-10-01.6','2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14'):
+        if source.get('processing_method_version') in ('2026-10-01.6','2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15'):
             context = evidence_context(message,source['source_type'])
             semantic_statement = c['statement']
-            if source.get('processing_method_version') in ('2026-10-01.13','2026-10-01.14') and source['source_type']!='imported_summary':
+            if source.get('processing_method_version') in ('2026-10-01.13','2026-10-01.14','2026-10-02.15') and source['source_type']!='imported_summary':
                 prefix = ('来源消息日期：'+context['source_date']+'（非事件成立时间，当前有效性待核实）。') if context['source_date'] else ''
                 if c['topic']=='projects' and context['conversation_title']:
                     prefix += '来源对话：'+context['conversation_title']+'。'
@@ -454,13 +467,13 @@ def validate_plan(plan, source):
                     raise Invalid('历史陈述必须保留来源日期，不能把历史要求当成当前状态')
                 if c['topic']=='projects' and context['conversation_title'] and context['conversation_title'] not in c['statement']:
                     raise Invalid('项目陈述必须保留来源对话标题，不能猜测项目身份或使用模糊指代')
-            elif source.get('processing_method_version') in ('2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14') and '原始时间未知' not in c['statement']:
+            elif source.get('processing_method_version') in ('2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15') and '原始时间未知' not in c['statement']:
                 raise Invalid('摘要更新时间不能充当事件时间，请明确原始时间未知')
             elif not c['statement'].startswith(('摘要记载','摘要主张')):
                 raise Invalid('二手摘要必须明确归属，不能升格为本人陈述')
         from .modality import evidence_modality, modality_problem
         mode = evidence_modality(c['quote'])
-        if source.get('processing_method_version') == '2026-10-01.14':
+        if source.get('processing_method_version') in ('2026-10-01.14','2026-10-02.15'):
             problem = modality_problem(c['quote'], semantic_statement, c['kind'])
             if problem:
                 raise Invalid(problem)

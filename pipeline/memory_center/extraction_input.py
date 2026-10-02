@@ -53,7 +53,7 @@ def prepare_request(source_type,messages,*,version=None):
             if prefix and contains_immediate_command(prefix.group()):start=prefix.end()
             for match in re.finditer(r'.+?(?:\n\s*\n|$)',text[start:end_of_evidence],re.S):
                 body=match.group();offset=start+match.start();part=0
-                if version=='2026-10-01.14':
+                if version in ('2026-10-01.14','2026-10-02.15'):
                     from .modality import evidence_ranges,evidence_modality
                     ranges=evidence_ranges(body)
                 else:ranges=[(0,len(body))]
@@ -69,10 +69,10 @@ def prepare_request(source_type,messages,*,version=None):
                     if quote.strip().strip('。.!！') in ('继续','好的','好','yes','ok','continue'):continue
                     if source_type=='imported_summary' and re.search(r'SKILL\.md.*\d+\s*lines',quote):continue
                     spans[sid]={'message_id':message['id'],'quote':quote,'start':offset+end-len(quote),'end':offset+end,'_source_title':message.get('source_title'),'_source_type':source_type,'_created_at':message.get('created_at')}
-                    if version=='2026-10-01.14':spans[sid]['_modality']=evidence_modality(quote)
+                    if version in ('2026-10-01.14','2026-10-02.15'):spans[sid]['_modality']=evidence_modality(quote)
                     pieces.append({'evidence_id':sid,'text':quote,
                                    'priority_hint':'explicit_configuration' if _configuration_hint(quote) else 'ordinary'})
-                    if version=='2026-10-01.14':pieces[-1]['modality_hint']=spans[sid]['_modality']
+                    if version in ('2026-10-01.14','2026-10-02.15'):pieces[-1]['modality_hint']=spans[sid]['_modality']
         prepared.append({'id':message['id'],'role':message['role'],'source_title':message.get('source_title'),
                          'created_at':message.get('created_at'),'route':route,'reference_reason':reference_reason,
                          'evidence_spans':pieces})
@@ -89,7 +89,7 @@ def resolve_plan(plan,spans,*,version=None):
         if ('message_id' in claim and claim['message_id']!=evidence['message_id']) or ('quote' in claim and claim['quote']!=evidence['quote']):
             raise Invalid('证据定位与所选片段冲突')
         attached = claim | {k:v for k,v in evidence.items() if not k.startswith('_')}
-        if version=='2026-10-01.14':
+        if version in ('2026-10-01.14','2026-10-02.15'):
             from .modality import evidence_modality,modality_problem
             if not isinstance(claim.get('statement'),str):raise Invalid('模型陈述必须为文本')
             problem=modality_problem(evidence['quote'],claim['statement'],claim.get('kind'))
@@ -98,9 +98,9 @@ def resolve_plan(plan,spans,*,version=None):
         # Source scope is metadata, not an inferred project name or proof of
         # the claim. Legacy methods are unchanged; v12 adds an explicit label.
         title = evidence.get('_source_title')
-        if version in ('2026-10-01.12','2026-10-01.13','2026-10-01.14') and claim.get('topic')=='projects' and evidence.get('_source_type')!='imported_summary' and isinstance(title,str) and title and isinstance(claim.get('statement'),str):
+        if version in ('2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15') and claim.get('topic')=='projects' and evidence.get('_source_type')!='imported_summary' and isinstance(title,str) and title and isinstance(claim.get('statement'),str):
             attached['statement'] = '来源对话：'+title+'。'+claim['statement']
-        if version in ('2026-10-01.13','2026-10-01.14') and evidence.get('_source_type')!='imported_summary' and isinstance(attached.get('statement'),str):
+        if version in ('2026-10-01.13','2026-10-01.14','2026-10-02.15') and evidence.get('_source_type')!='imported_summary' and isinstance(attached.get('statement'),str):
             from .claim_context import evidence_context
             date = evidence_context({'created_at':evidence.get('_created_at')},evidence.get('_source_type'))['source_date']
             if date:

@@ -5,7 +5,7 @@ and budget extraction. Matching a quote does not verify the resulting statement.
 """
 import json
 import time
-from .core import Invalid, permit, validate_plan, uid, encoded
+from .core import Invalid, permit, permit_model, validate_plan, uid, encoded
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS extraction_previews(
@@ -82,6 +82,7 @@ def enqueue(store,principal,source_id,request_key,operation='reextract',record_i
         source=db.execute('SELECT * FROM sources WHERE id=? AND owner=?',(source_id,principal['owner'])).fetchone()
         if not source:raise Invalid('来源不存在')
         permit(principal,source['scope'],'read');permit(principal,source['scope'],'write')
+        permit_model(principal, source['scope'])
         if operation=='translate':
             record=db.execute("SELECT id FROM records WHERE id=? AND owner=? AND source_id=? AND lifecycle='active'", (record_id,principal['owner'],source_id)).fetchone()
             if not record:raise Invalid('待翻译记录不存在或已被取代')
@@ -188,6 +189,7 @@ def control(store,principal,run_id,action,indices=None):
         if not run:raise Invalid('任务不存在')
         permit(principal,run['scope'],'write')
         if action=='retry':
+            permit_model(principal, run['scope'])
             if run['state']!='failed':raise Conflict('仅失败任务可重试')
             db.execute("UPDATE extraction_runs SET state='received',error=NULL WHERE id=?",(run_id,));return {'state':'received'}
         if run['state']!='ready':raise Conflict('只能处理待审核的结果')

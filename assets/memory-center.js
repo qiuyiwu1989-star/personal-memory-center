@@ -330,13 +330,14 @@
     for(const v of identity.scopes){const option=node('option',v);option.value=v;scope.append(option);}if(identity.scopes.includes('personal'))scope.value='personal';scope.setAttribute('aria-label','授权范围');
     days.type='number';days.value=30;days.min=1;days.max=90;days.required=true;days.setAttribute('aria-label','有效天数');
     source.type='checkbox';source.style.width='auto';const sourceLabel=node('label','允许查看原文');sourceLabel.prepend(source);source.disabled=!identity.actions.includes('source_read');
-    write.type='checkbox';write.style.width='auto';const writeLabel=node('label','允许写入独立收件箱');writeLabel.prepend(write);
+    write.type='checkbox';write.style.width='auto';const writeLabel=node('label','允许归档到独立收件箱（不触发模型提炼）');writeLabel.prepend(write);
     function allowedWrite(){write.disabled=!scope.value.startsWith('agent:')||!scope.value.endsWith('-inbox');if(write.disabled)write.checked=false;}scope.addEventListener('change',allowedWrite);allowedWrite();
     const save=node('button','创建凭据','primary');form.append(label,scope,node('label','有效天数（1–90）'),days,sourceLabel,writeLabel,save);host.append(form);
     const secretHost=node('div'),list=node('div');host.append(secretHost,list);
     const isCurrent=()=>epoch===reviewEpoch&&identity===activeIdentity&&host.contains(form)&&$('review-dialog').open;
     function render(rows){list.replaceChildren();if(!rows.length)list.append(node('p','尚无可管理的 Agent 凭据。','muted'));
       for(const row of rows){const card=node('article',undefined,'record');card.append(node('h3',row.description||row.id),node('p',row.scopes.join('、')+' · '+row.actions.join(' / ')+' · '+({active:'有效',expired:'已到期',revoked:'已撤销'}[row.state]||row.state),'muted'),node('p',row.expires_at?'到期：'+new Date(row.expires_at*1000).toLocaleString():'未设置到期','muted'));
+        if(row.actions.includes('write'))card.append(node('p',row.archive_only===true?'写入只归档，模型提炼和再次提炼被禁止。':'旧版写入凭据未限制模型调用；需要时撤销并创建新版凭据。','muted'));
         if(row.state==='active'){const revoke=node('button','撤销');revoke.addEventListener('click',async()=>{revoke.disabled=true;try{await api('/agent-credentials/'+encodeURIComponent(row.id)+'/revoke',{});const result=await api('/agent-credentials');if(isCurrent())render(result.credentials);}catch(err){if(isCurrent()){notice(err.message,true);revoke.disabled=false;}}});card.append(revoke);}list.append(card);}}
     render(data.credentials);if(data.truncated)host.append(node('p','当前展示前100份；更多凭据请联系维护者。','muted'));
     let fingerprint,requestKey;

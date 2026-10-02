@@ -5,7 +5,7 @@ import re
 import os
 import time
 from pathlib import Path
-from .core import Invalid, encoded, permit
+from .core import Invalid, encoded, permit, permit_model
 from .budget import scoped_spent
 from .claude import PARSER_VERSION
 
@@ -89,6 +89,7 @@ class Bulk:
     def create(self, principal, batch_id, token_limit=1_000_000):
         permit(principal,'claude:archive','read')
         permit(principal,SCOPE,'write')
+        permit_model(principal,SCOPE)
         if not principal.get('trusted_user'):
             raise PermissionError('仅本人可启动全量提炼')
         if type(token_limit) is not int or not 100_000<=token_limit<=10_000_000:
@@ -204,6 +205,7 @@ class Bulk:
             raise PermissionError('仅本人可控制批次')
         if action not in ('pause','resume','retry_failed','set_limit'):
             raise Invalid('无效操作')
+        if action!='pause':permit_model(principal,scoped['scope'])
         if action!='pause' and self.status(principal,batch_id)['requires_replan']:
             raise Invalid('旧批次包含混合正文，需按可见内容重新规划；提高预算不会修正旧输入')
         if action=='set_limit':

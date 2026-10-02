@@ -74,7 +74,7 @@ class ExtractionQualityTest(unittest.TestCase):
         serialized=json.dumps(result,ensure_ascii=False)
         self.assertNotIn(quote,serialized)
         self.assertNotIn(c['statement'],serialized)
-        self.assertEqual(result['quality_policy_version'],'extraction-quality-review-v1')
+        self.assertEqual(result['quality_policy_version'],'extraction-quality-review-v2')
 
     def test_display_notes_are_separate_bounded_and_no_adoption_is_implied(self):
         claims=[claim('用户请求调研合成产品。')]
