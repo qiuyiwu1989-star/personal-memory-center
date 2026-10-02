@@ -416,10 +416,10 @@ def install(app):
     return store, model
 
 
-def local_app(store, grants, model, auto_principal=None):
+def local_app(store, grants, model, auto_principal=None, credential_manager=None):
     app = Flask(__name__, static_folder=None)
     app.config['MAX_CONTENT_LENGTH'] = 150000
-    app.register_blueprint(blueprint(store, grants, model))
+    app.register_blueprint(blueprint(store, grants, model, credential_manager=credential_manager))
     root = Path(__file__).resolve().parents[2]
 
     @app.before_request
