@@ -1,5 +1,7 @@
 # Candidate rank window — 2026-10-03
 
+This document records the round-two internal implementation. Round three exposes `memory_candidate_search` over MCP and `/candidate-search` over REST; see [the current remote contract](CANDIDATE-REMOTE-READING.md). The continuation limitations below describe the earlier round-two interface.
+
 The default `lexical-v1` evidence bundle now avoids decoding every candidate's source document to return a small report. `Store.candidate_reports` counts and ranks all active candidate records in the authorized owner/scope, retains a bounded heap of IDs, then calls the existing source/governance hydration path only for the requested ranking window. No schema, model calls, original data, permission policy, or trusted-context fingerprint contract changes.
 
 ## Selection and compatibility
