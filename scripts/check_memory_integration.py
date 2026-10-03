@@ -2,6 +2,7 @@
 
 --self-test uses synthetic data and ephemeral in-process MCP, not an actual client.
 --check-input prepares payloads but outputs only aggregate counts and SHA256 digests.
+--check-tools inspects an offline tools/list export; it never installs or grants access.
 """
 import argparse
 import hashlib
@@ -18,6 +19,61 @@ from pipeline.memory_center.core import Invalid, Store, encoded
 from pipeline.memory_center.import_adapter import prepare_imports
 
 INPUT_FIELDS = {'source_key', 'scope', 'source_type', 'source_metadata', 'messages'}
+
+
+READ_SCHEMAS = {
+    'memory_context': {'query': 'string', 'scope': 'string', 'max_chars': 'integer'},
+    'memory_candidate_search': {'query': 'string', 'scope': 'string', 'max_chars': 'integer',
+        'offset': 'integer', 'window_limit': 'integer', 'retrieval_mode': 'string'},
+    'memory_search': {'query': 'string', 'scope': 'string', 'max_chars': 'integer'},
+    'memory_archive_search': {'query': 'string', 'scope': 'string', 'max_chars': 'integer'},
+    'memory_archive_source_get': {'locator': 'object', 'scope': 'string', 'offset': 'integer', 'max_chars': 'integer'},
+}
+
+
+def inspect_tools(body):
+    """Probe actual schema capabilities, independent of tool count and token grants."""
+    if isinstance(body, dict) and 'result' in body:
+        body = body['result']
+    listing = body.get('tools') if isinstance(body, dict) else body
+    if not isinstance(listing, list) or any(not isinstance(t, dict) for t in listing):
+        raise Invalid('Expected tools/list export')
+    names = [t.get('name') for t in listing]
+    if any(not isinstance(n, str) for n in names) or len(names) != len(set(names)):
+        raise Invalid('Invalid or duplicate tool names')
+    tools = {t['name']: t for t in listing}
+    capabilities = {}
+    for name, expected in READ_SCHEMAS.items():
+        tool = tools.get(name)
+        if tool is None:
+            capabilities[name] = {'available': False, 'reason': 'tool_missing'}
+            continue
+        schema = tool.get('inputSchema', {})
+        properties = schema.get('properties', {}) if isinstance(schema, dict) else {}
+        if not isinstance(properties, dict):
+            properties = {}
+        incompatible = [key for key, kind in expected.items()
+            if not isinstance(properties.get(key), dict) or properties[key].get('type') != kind]
+        # An unknown mandatory parameter cannot be supplied from this contract.
+        required = schema.get('required', []) if isinstance(schema, dict) else []
+        if not isinstance(required, list) or any(not isinstance(key, str) for key in required):
+            required = ['invalid_required_schema']
+        supported = set(expected)
+        incompatible.extend(key for key in required if key not in supported)
+        capabilities[name] = {'available': not incompatible,
+            'reason': 'schema_compatible' if not incompatible else 'schema_incompatible',
+            'incompatible_fields': sorted(set(incompatible))}
+    context_ready = capabilities['memory_context']['available']
+    window_ready = capabilities['memory_candidate_search']['available']
+    legacy_ready = capabilities['memory_search']['available']
+    return {'mode': 'offline-schema-inspection', 'network_calls': 0, 'model_calls': 0,
+        'capabilities': capabilities, 'trusted_context_ready': context_ready,
+        'progressive_window_ready': context_ready and window_ready,
+        'candidate_read_mode': ('window' if window_ready else
+            'legacy_narrow_query' if legacy_ready else 'unavailable'),
+        'permissions_verified': False, 'actual_client_verified': False,
+        'compatibility_note': ('window_available' if window_ready else
+            'window_unavailable_no_implicit_paging_or_scope_expansion')}
 
 
 def inspect_input(body):
@@ -91,6 +147,9 @@ def run_self_test():
 
             listing = rpc('tools/list', {}).json()['result']['tools']
             assert {'memory_import', 'memory_import_status', 'memory_context', 'memory_source_get'} <= {t['name'] for t in listing}
+            capabilities = inspect_tools(listing)
+            assert capabilities['progressive_window_ready']
+            assert capabilities['capabilities']['memory_archive_source_get']['available']
             receipts = []
             # Simulates an unknown network outcome: discard first reply, then retry
             # exact payload after constructing a fresh local caller invocation.
@@ -116,6 +175,11 @@ def run_self_test():
                 assert call(name, payload).get('isError') is True
             empty = value(call('memory_context', {'scope': scope, 'query': '', 'max_chars': 1600}))
             assert not empty['records']
+            candidates = value(call('memory_candidate_search', {'scope': scope, 'query': '',
+                'max_chars': 1600, 'offset': 0, 'window_limit': 8, 'retrieval_mode': 'lexical-v1'}))
+            assert candidates['kind'] == 'candidate_reports' and candidates['facts_confirmed'] is False
+            assert not candidates['records'] and len(encoded(candidates)) <= 1600
+            assert call('memory_candidate_search', {'scope': 'personal', 'query': ''}).get('isError') is True
             for function, body in ((store.correct, {'statement': '合成更正', 'revision': 1}),
                                    (lambda p, rid, b: review(store, p, rid, b), {'state': 'verified', 'revision': 0})):
                 try:
@@ -139,7 +203,7 @@ def run_self_test():
             assert db.execute('SELECT count(*) FROM extraction_runs').fetchone()[0] == 0
             assert {r[0] for r in db.execute('SELECT trusted_user FROM sources')} == {0}
         return {'synthetic': True, 'mode': 'in-process-mcp-self-test', 'checks_passed': [
-            'tools-list', 'lossless-unicode-packing', 'explicit-roles', 'retry-same-receipt',
+            'schema-capabilities', 'empty-trusted-not-candidate-fallback', 'candidate-window-cross-scope-denied', 'lossless-unicode-packing', 'explicit-roles', 'retry-same-receipt',
             'new-version-retains-old', 'archive-vs-index-status', 'bounded-original-read',
             'cross-scope-denied', 'model-entry-denied', 'owner-correction-confirmation-denied',
             'trusted-context-empty', 'source-read-capability-denied', 'read-only-write-denied',
@@ -154,9 +218,15 @@ def main(argv=None):
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument('--self-test', action='store_true')
     modes.add_argument('--check-input', type=Path)
+    modes.add_argument('--check-tools', type=Path)
     args = parser.parse_args(argv)
     try:
-        result = run_self_test() if args.self_test else inspect_input(json.loads(args.check_input.read_text()))
+        if args.self_test:
+            result = run_self_test()
+        elif args.check_tools:
+            result = inspect_tools(json.loads(args.check_tools.read_text()))
+        else:
+            result = inspect_input(json.loads(args.check_input.read_text()))
     except Exception as exc:
         # Provider errors, validation bodies and local paths are not printed.
         print(json.dumps({'ok': False, 'error_type': type(exc).__name__}))

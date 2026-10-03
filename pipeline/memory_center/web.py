@@ -105,6 +105,21 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
     def ingest():
         return jsonify(store.ingest(g.memory_principal, body())), 202
 
+    @bp.get('/candidate-search')
+    def candidate_search():
+        from .reading import fit_candidate_coverage
+        def integer(name,default):
+            value=request.args.get(name)
+            if value is None:return default
+            if not value.isascii() or not value.isdecimal():raise Invalid('候选分页参数应为整数')
+            try:return int(value)
+            except ValueError:raise Invalid('候选分页参数应为整数')
+        result=store.candidate_reports(g.memory_principal,request.args.get('scope','personal'),request.args.get('q',''),
+            integer('max_chars',6000),request.args.get('retrieval_mode','lexical-v1'),integer('offset',0),integer('window_limit',128))
+        result.update(kind='candidate_reports',facts_confirmed=False)
+        result=fit_candidate_coverage(result,integer('max_chars',6000))
+        return Response(encoded(result),mimetype='application/json')
+
     @bp.get('/archive-search')
     def archive_source_search():
         from .source_discovery import search

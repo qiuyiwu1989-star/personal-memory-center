@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import httpx
 from flask import Flask, request
+from pydantic import StrictInt
 from starlette.applications import Starlette
 from starlette.middleware.wsgi import WSGIMiddleware
 from starlette.responses import JSONResponse
@@ -64,8 +65,17 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
         return search_page(store.snapshot(principal(ctx),scope,query,retrieval_mode=retrieval_mode),max_chars)
 
     @mcp.tool()
+    def memory_candidate_search(query:str, ctx:Context, scope:str='personal', max_chars:StrictInt=6000, retrieval_mode:str='lexical-v1', offset:StrictInt=0, window_limit:StrictInt=128)->dict:
+        """Read a ranked candidate window, never verified context. Requires read only; no LLM. Continue using coverage.continue_offset, or repeat coverage.offset with a larger character budget for omitted whole items. Offsets are live ranks, not a stable snapshot across concurrent writes."""
+        from .reading import fit_candidate_coverage
+        result=store.candidate_reports(principal(ctx),scope,query,max_chars,retrieval_mode,offset,window_limit)
+        result.update(kind='candidate_reports',facts_confirmed=False)
+        result=fit_candidate_coverage(result,max_chars)
+        return CallToolResult(content=[TextContent(type='text',text=encoded(result))],structuredContent=result)
+
+    @mcp.tool()
     def memory_context(query:str, ctx:Context, scope:str='personal', max_chars:int=1600, retrieval_mode:str='lexical-v1')->dict:
-        """Load bounded verified or owner-corrected context; no model calls or candidate fallback. Default lexical-v1, optional experimental lexical-v2/v3 may miss relevant material."""
+        """Load bounded explicitly verified context; no model calls or candidate fallback. Default lexical-v1, optional experimental lexical-v2/v3 may miss relevant material."""
         from .governance import context
         return context(store, principal(ctx), scope, query, max_chars, retrieval_mode)
 

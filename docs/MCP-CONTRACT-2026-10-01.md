@@ -8,15 +8,16 @@
 
 | 工具 | 默认与边界 | 返回含义 / 权限 |
 | --- | --- | --- |
-| `memory_search` | query 必填；max_chars=6000；retrieval_mode=lexical-v1 | 带治理状态的候选，read；v2/v3 为显式词法实验，无自动降级、无真实性认证 |
-| `memory_context` | query 必填；max_chars=1600；retrieval_mode=lexical-v1 | 仅治理层判为可用的 verified/owner-corrected 记录；read；无候选补位 |
+| `memory_search` | query 必填；max_chars=6000；retrieval_mode=lexical-v1 | 兼容旧陈述搜索，返回治理状态，read；v2/v3 为显式词法实验，无自动降级、无真实性认证 |
+| `memory_candidate_search` | query 必填；offset=0；window_limit=128；max_chars=6000；retrieval_mode=lexical-v1 | 仅 active candidate，read；facts_confirmed=false；coverage 返回检查排名窗口与继续位置，无模型调用 |
+| `memory_context` | query 必填；max_chars=1600；retrieval_mode=lexical-v1 | 仅治理层判为完整、当前有效且明确 verified 的记录；read；无候选补位 |
 | `memory_document_get` | topic_id=''；offset=0；max_chars=4000 | 空 topic 列文档目录，指定 topic 读 MD 页；read；目录 offset 为条数，正文 offset 为字符 |
 | `memory_source_get` | source_id/message_id 必填；offset=0；max_chars=4000 | 一条原消息的有界页；同 owner 且 scope 的 source_read 权限 |
 | `memory_import` | source_key/messages 必填；source_type=document；processing_policy=archive | scoped write；最多100条、24,000序列化字符，默认只归档，不调用提炼模型 |
 | `memory_reextract` | source_id/request_key 必填 | scoped read+write；返回排队 ID，不覆盖旧版，不确认候选；使用当前方法和同一模型预算 |
 | `memory_import_status` | job_id 必填 | 同 owner、scope read；返回单任务 state/attempts/error/usage，不返回原文；received 不等于完成 |
 
-所有读取均不调用提炼模型。分页与搜索预算为 **500–16,000 字符**，计算序列化返回信封，不能转换成精确账单 tokens。正文跟随 `next_offset` 拼接；检索返回 `truncated`，当前候选搜索没有 offset 参数，应收窄 query。空返回须说明范围与治理口径，不等于“从未发生”。
+所有读取均不调用提炼模型。分页与搜索预算为 **500–16,000 字符**，计算序列化返回信封，不能转换成精确账单 tokens。正文跟随 `next_offset` 拼接；检索返回 `truncated`；旧 memory_search 无 offset。新增 memory_candidate_search 按 coverage.continue_offset 续读；预算遗漏可重读同窗，排名会随并发写入变化，不保证稳定快照。上限及原文权限见 [候选远程读取](CANDIDATE-REMOTE-READING.md)。空返回须说明范围与治理口径，不等于“从未发生”。
 
 导入保存原 message id、role、created_at。source_metadata 支持 original_ref/original_date/author/locator/parser_version/parent_source_key；这些是来源说明，不是授权声明。重试使用稳定 source_key 及一致内容；相同来源键的不同内容不能假定为同一次导入。重提炼 request_key 同源、同方法、同操作保持幂等，冲突拒绝。
 

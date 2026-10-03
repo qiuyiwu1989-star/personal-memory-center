@@ -9,6 +9,8 @@ Use only the user's configured MCP and granted inbox scope. Credentials remain i
 client configuration, never in source text or tool arguments. If import tools or a
 write grant are absent, prepare a draft payload and report that it was not submitted.
 Installing this skill alone does not authorize sending private conversations.
+An empty trusted read is not a reason to import retrieved candidates as new user
+statements; upstream capture preserves original roles and references.
 
 Capture at a meaningful boundary: an explicit user decision, a durable constraint,
 a correction, or a useful agent proposal with evidence. During ongoing work with
