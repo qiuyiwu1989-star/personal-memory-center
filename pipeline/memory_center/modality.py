@@ -148,3 +148,46 @@ def scoped_evidence_ranges(text):
         return [(0,len(text))] if text else []
     positions=[0,*cuts,len(text)]
     return [(begin,end) for begin,end in zip(positions,positions[1:]) if begin<end]
+
+
+SCOPED_V19_GUARD_VERSION = 'condition-scope-v2-explicit'
+
+
+def scoped_evidence_ranges_v19(text):
+    """Add only an explicit independence declaration before a conditional plan.
+
+    This is not a scope parser. Adjacency, another subject or negated approval
+    alone never establishes independence. The source must explicitly declare
+    an independent wish AND deny approval, before a self-contained conditional
+    first-person plan. Common scope, pronoun continuation, quotations and lists
+    make this new rule abstain. v17/v18 boundaries remain unchanged.
+    Offsets are Python string offsets, exactly as the existing source contract.
+    """
+    fallback = scoped_evidence_ranges(text)
+    if not CONDITION.search(text):
+        return fallback
+    if LIST.search(text) or re.search(
+        r'说|表示|认为|转述|引述|原话|写道|来信|访谈|转发|以下|下面|[“”「」《》"\[\]【】（）()]|'
+        r"['`]|\b(?:said|says|letter|email|account from)\b", text, re.I):
+        return [(0,len(text))] if text else []
+    declaration = re.compile(
+        r'(?:这项|该项|上述)?期望独立成立[，,；;]\s*(?:我)?(?:尚未|没有)批准(?:实施|执行)[。！？!?]\s*$')
+    conditional_plan = re.compile(
+        r'\s*(?:如果|倘若|假如)[^。！？!?\n]{1,80}[，,]\s*我(?:计划|打算|准备)')
+    for boundary in re.finditer(r'[。！？!?]', text):
+        cut = boundary.end()
+        head, tail = text[:cut], text[cut:]
+        if not (re.match(r'\s*我(?:希望|想要|期望|考虑)',head) and
+                declaration.search(head) and conditional_plan.match(tail)):
+            continue
+        # A condition earlier in the wish or later in the plan can govern more
+        # than this boundary. Multiple intentions and backward references also
+        # need semantic review; keep all source context together.
+        if CONDITION.search(head) or len(list(CONDITION.finditer(tail))) != 1:
+            continue
+        if len(list(WISH.finditer(head[:declaration.search(head).start()]))) != 1 or PLAN.search(head) or ASSERTED.search(head):
+            continue
+        if re.search(r'上述|前述|以上|这项|该项|它|其|两项|共同|均|都|同样|也(?:要|会|将)|前提|\b(?:it|these|both|same)\b', tail, re.I):
+            continue
+        return [(0,cut),(cut,len(text))]
+    return fallback

@@ -9,7 +9,7 @@ class ModelErrorCodeTests(unittest.TestCase):
         self.assertEqual(actual, measured | {
             'source_visibility': {'status': 'unknown', 'declaration_only': True,
                                   'attachments_verified': False},
-            'condition_scope_guard_version': 'condition-scope-v1',
+            'condition_scope_guard_version': 'condition-scope-v2-explicit',
         })
         for field, value in measured.items():
             self.assertEqual(actual[field], value)
