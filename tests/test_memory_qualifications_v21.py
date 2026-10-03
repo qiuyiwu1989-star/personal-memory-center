@@ -56,7 +56,7 @@ class QualificationV21Test(unittest.TestCase):
     def test_negated_markers_do_not_count_as_preservation(self):
         for old in ('从现在起', '长期适用', '直到用户明确更改'):
             with self.subTest(old=old):
-                self.assertIn('否定', qualification_problem(self.quote, self.good.replace(old, '不是' + old), 'decision'))
+                self.assertIn('否定', qualification_problem(self.quote, self.good.replace(old, '不是（' + old + '）'), 'decision'))
 
     def test_adapter_rejects_omission_with_measured_usage(self):
         messages = [{'id': 'rule', 'role': 'user', 'text': self.quote}]
@@ -97,6 +97,8 @@ class QualificationV21Test(unittest.TestCase):
             '这条规则从现在起不生效。',
             '合成规则：自下次发布起执行；发布日期未知。',
             '仅 Atlas 长期保存，Orion 不适用。',
+            '我决定：从现在起，以下全部规则长期适用，直到我明确更改：Atlas 必须保留日志，Orion 半年后才生效且不得覆盖版本。',
+            '我决定：从现在起，以下全部规则长期适用，直到我明确更改：Atlas 必须保留日志，但 Orion 规则有效期三个月。',
             '旧项目必须保留日志。从现在起，新项目必须记录版本。这个要求长期适用，直到我明确更改。',
             '从现在起，Atlas 必须保留日志，Orion 必须记录版本。这个要求长期适用，直到我明确更改。',
         ):

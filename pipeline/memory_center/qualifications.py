@@ -20,6 +20,8 @@ def qualification_problem(quote, statement, kind):
         r'长期适用[，,]直到我明确更改[:：](?P<rules>[^。！？!?\n]+)[。.]?\s*', quote)
     if not match or not re.search(r'必须|禁止|不能|不得|要求', match['rules']):
         return None
+    if re.search(r'生效|有效期|期限|[年月周日天]|后才|但|例外|除|从|起|长期|直到|直至', match['rules']):
+        return None
     # Only the common block's own normative claims are checked. No propagation
     # to other kinds, and neither role nor approval is inferred by this helper.
     groups = (
@@ -28,7 +30,7 @@ def qualification_problem(quote, statement, kind):
         ('结束条件', ('直到我明确更改', '直到用户明确更改', '直至用户明确更改', '直至我明确更改')),
     )
     for label, alternatives in groups:
-        if any(re.search(r'(?:不是|并非|并不|不再|不|没有|无需|非)\s*' + re.escape(value), statement) for value in alternatives):
+        if any(re.search(r'(?:不是|并非|并不|不再|不|没有|无需|非)[\s（(【\[]*' + re.escape(value), statement) for value in alternatives):
             return '拆分后的共同规则否定了明确' + label + '，需复核'
         if not any(value in statement for value in alternatives):
             return '拆分后的共同规则遗漏明确' + label + '，需保留来源限定或复核'
