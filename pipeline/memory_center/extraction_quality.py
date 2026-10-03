@@ -2,9 +2,9 @@
 import hashlib
 import json
 import re
-from .modality import CONDITION, WISH, PLAN, evidence_ranges
+from .modality import CONDITION, WISH, PLAN, ASSERTED, evidence_ranges
 
-QUALITY_POLICY_VERSION='extraction-quality-review-v2'
+QUALITY_POLICY_VERSION='extraction-quality-review-v3'
 FACT_SIGNAL=re.compile(r'名叫|叫做|命名为|名称(?:为|是)|已(?:经)?(?:完成|部署|采用)|\b(?:named|called|completed|deployed)\b',re.I)
 TASK_SIGNAL=re.compile(r'(?:请|帮我|麻烦|用户(?:请求|要求)|\b(?:please|requests?)\b).{0,24}(?:调研|比较|评估|总结|生成|整理|写一|画一|research|compare|evaluate|summarize|generate)',re.I)
 ENDURING_SIGNAL=re.compile(r'长期|持续|每次|始终|必须|不得|禁止|约束|\b(?:always|ongoing|must|never)\b',re.I)
@@ -13,6 +13,15 @@ ENDURING_SIGNAL=re.compile(r'长期|持续|每次|始终|必须|不得|禁止|�
 QUOTED_ACCOUNT=re.compile(r'(?:以下|下面|转发|收到).{0,32}(?:来信|信件|邮件|访谈|自述)|(?:老师|同事|朋友).{0,24}(?:写道|来信|发来|说：)|\b(?:letter|email|account)\s+from\b',re.I)
 SELF_RESOURCE=re.compile(r'(?:我|我们)(?:已经|目前)?(?:拥有|持有|有一个域名|有一座|任职|担任)|\bI\s+(?:have|own)\s+(?:(?:a|the|an)\s+)?(?:domain|studio|business|patent)\b',re.I)
 QUESTION=re.compile(r'[?？]|怎么|如何|\b(?:how|what should)\b',re.I)
+DIRECT_NEED=re.compile(r'需要|要求|\b(?:need|needs|require|requires)\b',re.I)
+THIRD_PARTY_ADVICE=re.compile(r'(?:同事|朋友|老师|顾问|供应商).{0,12}(?:建议|提议|推荐)|\b(?:colleague|advisor|consultant)\b.{0,24}\b(?:suggests?|recommends?)\b',re.I)
+OWNER_ATTRIBUTION=re.compile(r'用户|本人|\buser\b',re.I)
+
+
+def _owner_adoption_signal(text):
+    # Narrow positive signal only; mixed/negated adoption still needs review.
+    if re.search(r'不|没有|尚未|未决定|说|写道|来信|[“”「」\"]|\b(?:not|never|said|says)\b',text,re.I):return False
+    return bool(re.search(r'我(?:已|已经)?(?:决定采用|决定采纳|确认采用|正式采用)|\bI (?:have )?(?:decided to adopt|adopted)\b',text,re.I))
 
 
 def _messages(source):
@@ -75,6 +84,10 @@ def review(claims, source=None):
         source_text=message.get('text',quote)
         if QUOTED_ACCOUNT.search(source_text) and re.search(r'用户|本人|\buser\b',text,re.I):
             flag('nested_speaker_review','来源含第三方来信或自述信号，陈述提及用户；需逐个子句核对引文内说话者，外层用户角色不证明本人归属。')
+        if THIRD_PARTY_ADVICE.search(quote) and OWNER_ATTRIBUTION.search(text) and not _owner_adoption_signal(quote):
+            flag('third_party_advice_review','证据含第三方建议，陈述提及用户；未发现明确本人采纳信号，须核实是谁的建议，不能由外层角色推断本人决定。')
+        if DIRECT_NEED.search(quote) and not (PLAN.search(quote) or ASSERTED.search(quote)) and PLAN.search(text):
+            flag('need_to_plan_review','证据提出需要或要求，陈述改为计划；这可能增强承诺，需独立语义审阅，不仅凭词法判错误或通过。')
         # Enumerations are particularly easy to over-summarize across spans.
         # This is a coverage review request, not lexical proof of unsupportedness.
         if len(re.findall(r'[、；;]',text))>=2:

@@ -1,6 +1,6 @@
 """Read-only task evidence groups under one serialized JSON budget."""
 from .core import Invalid, encoded, permit
-from . import governance, reading, source_discovery
+from . import governance, source_discovery
 
 
 def bundle(store, principal, scope, query, max_chars=6000, retrieval_mode='lexical-v1'):
@@ -18,9 +18,7 @@ def bundle(store, principal, scope, query, max_chars=6000, retrieval_mode='lexic
     permit(principal, scope, 'read')
     trusted = governance.context(store, principal, scope, query, 16000, retrieval_mode)
     trusted.update(kind='trusted_context', status='available')
-    snapshot = store.snapshot(principal, scope, query, limit=1000000,
-                              governance_filter='candidate', retrieval_mode=retrieval_mode, include_jobs=False)
-    reports = reading.search_page(snapshot, max_chars=16000)
+    reports = store.candidate_reports(principal,scope,query,max_chars=16000,retrieval_mode=retrieval_mode)
     reports.update(kind='candidate_reports', status='available', facts_confirmed=False)
     try:
         permit(principal, scope, 'source_read')

@@ -1,0 +1,356 @@
+{
+  "suite_version": "synthetic-quality-contract-v1",
+  "annotation_status": "synthetic_fixture",
+  "origin": "Hand-authored synthetic development probes; no private source or real model output.",
+  "real_model_evaluation": "not_run",
+  "historical_case5": "not_retested_not_passed",
+  "cases": [
+    {
+      "case_id": "decision-explicit",
+      "category": "owner_decision",
+      "source_text": "我已决定采用 SyntheticAtlas 方案。",
+      "probe_claim": {
+        "statement": "用户已决定采用 SyntheticAtlas 方案。",
+        "quote": "我已决定采用 SyntheticAtlas 方案。",
+        "topic": "projects",
+        "kind": "decision",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "本人明确决定，可提出项目决定候选；不等于系统已部署或永远有效。"
+    },
+    {
+      "case_id": "decision-wish-promotion",
+      "category": "owner_decision",
+      "source_text": "我希望采用 SyntheticAtlas 方案。",
+      "probe_claim": {
+        "statement": "用户已决定采用 SyntheticAtlas 方案。",
+        "quote": "我希望采用 SyntheticAtlas 方案。",
+        "topic": "projects",
+        "kind": "decision",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": true,
+        "required_review_codes": [],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "候选需要独立核实归属、有效时间及来源，词法无报警不代表通过。"
+    },
+    {
+      "case_id": "decision-plan-promotion",
+      "category": "owner_decision",
+      "source_text": "我计划采用 SyntheticAtlas 方案。",
+      "probe_claim": {
+        "statement": "用户已完成 SyntheticAtlas 方案部署。",
+        "quote": "我计划采用 SyntheticAtlas 方案。",
+        "topic": "projects",
+        "kind": "event",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": true,
+        "required_review_codes": [],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "候选需要独立核实归属、有效时间及来源，词法无报警不代表通过。"
+    },
+    {
+      "case_id": "advice-correct-holder",
+      "category": "third_party",
+      "source_text": "同事建议 SyntheticAtlas 保存出处。",
+      "probe_claim": {
+        "statement": "同事建议 SyntheticAtlas 保存出处。",
+        "quote": "同事建议 SyntheticAtlas 保存出处。",
+        "topic": "projects",
+        "kind": "claim",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [],
+        "forbidden_review_codes": [
+          "third_party_advice_review"
+        ]
+      },
+      "semantic_rubric": "这是同事的建议，不是本人决定；不能升格个人偏好。"
+    },
+    {
+      "case_id": "advice-owner-promotion",
+      "category": "third_party",
+      "source_text": "同事建议 SyntheticAtlas 保存出处。",
+      "probe_claim": {
+        "statement": "用户决定 SyntheticAtlas 保存出处。",
+        "quote": "同事建议 SyntheticAtlas 保存出处。",
+        "topic": "projects",
+        "kind": "decision",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [
+          "third_party_advice_review"
+        ],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "候选需要独立核实归属、有效时间及来源，词法无报警不代表通过。"
+    },
+    {
+      "case_id": "advice-owner-adopted",
+      "category": "third_party",
+      "source_text": "同事建议 SyntheticAtlas 保存出处。我已决定采用这一建议。",
+      "probe_claim": {
+        "statement": "用户决定 SyntheticAtlas 保存出处。",
+        "quote": "同事建议 SyntheticAtlas 保存出处。我已决定采用这一建议。",
+        "topic": "projects",
+        "kind": "decision",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [],
+        "forbidden_review_codes": [
+          "third_party_advice_review"
+        ]
+      },
+      "semantic_rubric": "原文含本人采纳，仍须核对采纳范围与时间；无报警不是语义确认。"
+    },
+    {
+      "case_id": "advice-owner-not-adopted",
+      "category": "third_party",
+      "source_text": "同事建议 SyntheticAtlas 保存出处。我尚未决定采用。",
+      "probe_claim": {
+        "statement": "用户已决定采用这一建议。",
+        "quote": "同事建议 SyntheticAtlas 保存出处。我尚未决定采用。",
+        "topic": "projects",
+        "kind": "decision",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [
+          "third_party_advice_review"
+        ],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "候选需要独立核实归属、有效时间及来源，词法无报警不代表通过。"
+    },
+    {
+      "case_id": "conditional-preserved",
+      "category": "conditional",
+      "source_text": "如果测试通过，我计划发布 SyntheticAtlas。",
+      "probe_claim": {
+        "statement": "如果测试通过，用户计划发布 SyntheticAtlas。",
+        "quote": "如果测试通过，我计划发布 SyntheticAtlas。",
+        "topic": "projects",
+        "kind": "plan",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [],
+        "forbidden_review_codes": [
+          "condition_scope_review"
+        ]
+      },
+      "semantic_rubric": "候选需要独立核实归属、有效时间及来源，词法无报警不代表通过。"
+    },
+    {
+      "case_id": "conditional-omitted",
+      "category": "conditional",
+      "source_text": "如果测试通过，我计划发布 SyntheticAtlas。",
+      "probe_claim": {
+        "statement": "用户计划发布 SyntheticAtlas。",
+        "quote": "如果测试通过，我计划发布 SyntheticAtlas。",
+        "topic": "projects",
+        "kind": "plan",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": true,
+        "required_review_codes": [
+          "condition_scope_review"
+        ],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "候选需要独立核实归属、有效时间及来源，词法无报警不代表通过。"
+    },
+    {
+      "case_id": "conditional-independent-name",
+      "category": "conditional",
+      "source_text": "如果测试通过，我计划发布 SyntheticAtlas。我对另一独立项目 SyntheticOrion 的要求是：保留出处。",
+      "probe_claim": {
+        "statement": "用户对 SyntheticOrion 要求保留出处。",
+        "quote": "如果测试通过，我计划发布 SyntheticAtlas。我对另一独立项目 SyntheticOrion 的要求是：保留出处。",
+        "topic": "projects",
+        "kind": "claim",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [
+          "condition_scope_review"
+        ],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "整段探针仍报警待审，v17精确独立子span另由边界回归验证；不可任意移除条件。"
+    },
+    {
+      "case_id": "correction-explicit",
+      "category": "correction",
+      "source_text": "更正：此前 SyntheticAtlas 的计划已取消，目前只保留 SyntheticOrion 的试验。",
+      "probe_claim": {
+        "statement": "用户更正此前 SyntheticAtlas 的计划已取消，目前只保留 SyntheticOrion 的试验。",
+        "quote": "更正：此前 SyntheticAtlas 的计划已取消，目前只保留 SyntheticOrion 的试验。",
+        "topic": "projects",
+        "kind": "claim",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "记录更正及被取代对象，旧版本保留；不能把旧计划同时当作当前计划。当前词法层不解析跨消息失效关系。"
+    },
+    {
+      "case_id": "correction-stale-counterexample",
+      "category": "correction",
+      "source_text": "更正：此前 SyntheticAtlas 的计划已取消，目前只保留 SyntheticOrion 的试验。",
+      "probe_claim": {
+        "statement": "用户计划继续推进 SyntheticAtlas。",
+        "quote": "更正：此前 SyntheticAtlas 的计划已取消，目前只保留 SyntheticOrion 的试验。",
+        "topic": "projects",
+        "kind": "plan",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "故意不受当前词法层拦截的负例：旧计划与更正矛盾，必须独立语义及时间关系审阅，不计通过。"
+    },
+    {
+      "case_id": "need-faithful",
+      "category": "need_vs_plan",
+      "source_text": "我需要 SyntheticAtlas 保留出处。",
+      "probe_claim": {
+        "statement": "用户需要 SyntheticAtlas 保留出处。",
+        "quote": "我需要 SyntheticAtlas 保留出处。",
+        "topic": "projects",
+        "kind": "claim",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [],
+        "forbidden_review_codes": [
+          "need_to_plan_review"
+        ]
+      },
+      "semantic_rubric": "候选需要独立核实归属、有效时间及来源，词法无报警不代表通过。"
+    },
+    {
+      "case_id": "need-plan-strengthening",
+      "category": "need_vs_plan",
+      "source_text": "我需要 SyntheticAtlas 保留出处。",
+      "probe_claim": {
+        "statement": "用户计划 SyntheticAtlas 保留出处。",
+        "quote": "我需要 SyntheticAtlas 保留出处。",
+        "topic": "projects",
+        "kind": "plan",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [
+          "need_to_plan_review"
+        ],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "候选需要独立核实归属、有效时间及来源，词法无报警不代表通过。"
+    },
+    {
+      "case_id": "need-explicit-plan",
+      "category": "need_vs_plan",
+      "source_text": "我需要保存出处，我计划让 SyntheticAtlas 支持这一点。",
+      "probe_claim": {
+        "statement": "用户计划 SyntheticAtlas 保存出处。",
+        "quote": "我需要保存出处，我计划让 SyntheticAtlas 支持这一点。",
+        "topic": "projects",
+        "kind": "plan",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": false,
+        "required_review_codes": [],
+        "forbidden_review_codes": [
+          "need_to_plan_review"
+        ]
+      },
+      "semantic_rubric": "候选需要独立核实归属、有效时间及来源，词法无报警不代表通过。"
+    },
+    {
+      "case_id": "need-negated-plan",
+      "category": "need_vs_plan",
+      "source_text": "我需要保留出处，但我没有计划发布 SyntheticAtlas。",
+      "probe_claim": {
+        "statement": "用户计划发布 SyntheticAtlas。",
+        "quote": "我需要保留出处，但我没有计划发布 SyntheticAtlas。",
+        "topic": "projects",
+        "kind": "plan",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": true,
+        "required_review_codes": [],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "候选需要独立核实归属、有效时间及来源，词法无报警不代表通过。"
+    },
+    {
+      "case_id": "mixed-same-project-summary",
+      "category": "need_vs_plan",
+      "source_text": "如果团队需要协作标准，内容该如何定义？总之，我们需要建立一套 SyntheticAtlas 协作管理体系。",
+      "probe_claim": {
+        "statement": "用户计划建立 SyntheticAtlas 协作管理体系。",
+        "quote": "如果团队需要协作标准，内容该如何定义？总之，我们需要建立一套 SyntheticAtlas 协作管理体系。",
+        "topic": "projects",
+        "kind": "plan",
+        "subject": "synthetic-project",
+        "status": "user_stated"
+      },
+      "expected_deterministic": {
+        "guard_reject": true,
+        "required_review_codes": [
+          "condition_scope_review",
+          "need_to_plan_review"
+        ],
+        "forbidden_review_codes": []
+      },
+      "semantic_rubric": "显式合成近邻而非私有case5原件；条件误报可能与需求增强并存，标 ambiguous，不能当作旧case5复测成功。"
+    }
+  ],
+  "synthetic": true
+}

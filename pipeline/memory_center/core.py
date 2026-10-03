@@ -1,6 +1,7 @@
 """Local pilot: private SQLite, durable jobs, evidence-backed immutable versions."""
 from contextlib import contextmanager
 import hashlib
+import heapq
 import json
 import os
 from pathlib import Path
@@ -259,7 +260,7 @@ class Store:
                 settle(db, attempt, usage)
         return True
 
-    def snapshot(self, principal, scope, query='', history=False, limit=100, governance_filter=None, retrieval_mode='lexical-v1', include_jobs=True):
+    def snapshot(self, principal, scope, query='', history=False, limit=100, governance_filter=None, retrieval_mode='lexical-v1', include_jobs=True, _record_ids=None):
         permit(principal, scope, 'read')
         if not isinstance(query, str) or len(query) > 500:
             raise Invalid('查询上限 500 字符')
@@ -267,10 +268,15 @@ class Store:
         if governance_filter and governance_filter not in ('candidate','verified','owner_corrected','historical','rejected','usable','history'):
             raise Invalid('治理筛选无效')
         if type(include_jobs) is not bool:raise Invalid('任务读取选项无效')
+        if _record_ids is not None and (not isinstance(_record_ids, (list, tuple)) or len(_record_ids)>128 or any(not isinstance(value,str) for value in _record_ids)):
+            raise Invalid('内部记录窗口无效')
         # Filter governance in SQL before source hydration. Python remains the
         # authority for usable/date semantics; this is a conservative prefilter.
         where='r.owner=? AND r.scope=? '
         params=[principal['owner'],scope]
+        if _record_ids is not None:
+            where+='AND r.id IN ('+','.join('?' for _ in _record_ids)+') ' if _record_ids else 'AND 1=0 '
+            params.extend(_record_ids)
         if not history:where+="AND r.lifecycle='active' "
         if governance_filter=='usable':
             where+="AND g.state='verified' AND g.holder IS NOT NULL AND g.holder<>'' AND g.subject_id IS NOT NULL AND g.subject_id<>'' AND g.as_of IS NOT NULL AND g.as_of<>'' "
@@ -283,7 +289,7 @@ class Store:
         with self.db() as db:
             rows=[dict(r) for r in db.execute('SELECT r.*,s.source_key,s.source_type,t.text translated_text,'+governance_columns+
                 ' FROM records r JOIN sources s ON s.id=r.source_id LEFT JOIN record_governance g ON g.record_id=r.id '
-                "LEFT JOIN record_translations t ON t.record_id=r.id AND t.language='zh' WHERE "+where+'ORDER BY r.created DESC',params)]
+                "LEFT JOIN record_translations t ON t.record_id=r.id AND t.language='zh' WHERE "+where+'ORDER BY r.created DESC,r.id ASC',params)]
             jobs=[dict(r) for r in db.execute('SELECT j.*,s.source_key FROM jobs j JOIN sources s ON s.id=j.source_id '
                 'WHERE s.owner=? AND s.scope=? ORDER BY j.created DESC LIMIT 40',(principal['owner'],scope))] if include_jobs else []
             # Fetch each selected source once. Do not duplicate its payload for
@@ -329,6 +335,65 @@ class Store:
             if isinstance(job['usage'],dict):job['usage'].pop('review_notes',None)
         return {'records':rows[:limit],'total':len(rows),'truncated':len(rows)>limit,
                 'status_counts':status_counts,'jobs':jobs,'scope':scope,'retrieval':retrieval_mode,'generated_at':time.time()}
+
+    def candidate_reports(self, principal, scope, query='', max_chars=16000,
+                          retrieval_mode='lexical-v1', offset=0, window_limit=128):
+        """Exact lexical-v1 count/rank scan, then hydrate only a ranked window.
+
+        The cursor scan still visits all eligible records; it keeps only IDs
+        for the requested window and never reads source payloads at this stage.
+        v2/v3 source-title ranking remains on the compatible full-scope path.
+        Continuation advances by examined ranks, not returned item count:
+        oversized items and later bundle trimming never masquerade as coverage.
+        """
+        permit(principal, scope, 'read')
+        if not isinstance(query,str) or len(query)>500:raise Invalid('查询上限 500 字符')
+        if type(max_chars) is not int or not 500<=max_chars<=16000:raise Invalid('检索预算无效')
+        if type(offset) is not int or not 0<=offset<=10000 or type(window_limit) is not int or not 1<=window_limit<=128:
+            raise Invalid('候选排名窗口无效')
+        from . import reading
+        def coverage(mode,examined,total):
+            end=offset+examined;more=end<total
+            result={'mode':mode,'offset':offset,'examined':examined,
+                'continue_offset':end if more and end<=10000 else None}
+            if more and end>10000:result['offset_limit_reached']=True
+            return result
+        if retrieval_mode in ('lexical-v2','lexical-v3'):
+            snapshot=self.snapshot(principal,scope,query,limit=1000000,
+                governance_filter='candidate',retrieval_mode=retrieval_mode,include_jobs=False)
+            total=snapshot['total'];snapshot['records']=snapshot['records'][offset:offset+window_limit]
+            result=reading.search_page(snapshot,max_chars)
+            result['coverage']=coverage('legacy_full_scope',len(snapshot['records']),total)
+            return reading.fit_candidate_coverage(result,max_chars)
+        if retrieval_mode!='lexical-v1':raise Invalid('检索模式无效')
+        terms=set(re.findall(r'[a-z0-9_]+|[\u4e00-\u9fff]',query.lower()))
+        query_lower=query.lower();query_present=bool(query.strip())
+        retained=[];total=0;capacity=offset+window_limit
+        with self.db() as db:
+            # Same recency order and strongest legacy score as snapshot.
+            rows=db.execute("SELECT r.id,r.statement,r.subject,r.topic,t.text translated_text FROM records r JOIN sources s ON s.id=r.source_id "
+                "LEFT JOIN record_governance g ON g.record_id=r.id "
+                "LEFT JOIN record_translations t ON t.record_id=r.id AND t.language='zh' "
+                "WHERE r.owner=? AND r.scope=? AND r.lifecycle='active' "
+                "AND COALESCE(g.state,'candidate')='candidate' ORDER BY r.created DESC,r.id ASC",
+                (principal['owner'],scope))
+            for index,raw in enumerate(rows):
+                if query_present:
+                    text=' '.join(str(value or '') for value in (raw['statement'],raw['translated_text'] if raw['translated_text'] is not None else raw['statement'],raw['subject'],raw['topic'])).lower()
+                    score=sum(term in text for term in terms)+5*(query_lower in text)
+                    if not score:continue
+                else:score=0
+                total+=1;entry=(score,-index,raw['id'])
+                if len(retained)<capacity:heapq.heappush(retained,entry)
+                elif entry>retained[0]:heapq.heapreplace(retained,entry)
+        selected=[entry[2] for entry in sorted(retained,reverse=True)[offset:]]
+        snapshot=self.snapshot(principal,scope,query,limit=window_limit,
+            governance_filter='candidate',retrieval_mode=retrieval_mode,include_jobs=False,_record_ids=selected)
+        order={value:index for index,value in enumerate(selected)}
+        snapshot['records'].sort(key=lambda row:order[row['id']]);snapshot['total']=total
+        result=reading.search_page(snapshot,max_chars)
+        result['coverage']=coverage('ranked_window',len(selected),total)
+        return reading.fit_candidate_coverage(result,max_chars)
 
     def materials(self, principal, offset=0, limit=40):
         """Owner workbench inventory. Keep source payloads out of the list response."""

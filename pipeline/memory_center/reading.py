@@ -55,3 +55,12 @@ def search_page(snapshot,max_chars=6000):
             result['records'].append(item);items_size+=size
     result['truncated']=len(result['records'])<snapshot['total']
     return result
+
+
+def fit_candidate_coverage(result,max_chars):
+    """Keep the explicit ranking window in the same whole-response budget."""
+    while len(encoded(result))>max_chars and result['records']:
+        result['records'].pop()
+    result['truncated']=len(result['records'])<result['total']
+    if len(encoded(result))>max_chars:raise Invalid('候选覆盖元信息超过预算')
+    return result
