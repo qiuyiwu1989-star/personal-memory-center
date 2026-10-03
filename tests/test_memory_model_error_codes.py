@@ -10,6 +10,7 @@ class ModelErrorCodeTests(unittest.TestCase):
             'source_visibility': {'status': 'unknown', 'declaration_only': True,
                                   'attachments_verified': False},
             'condition_scope_guard_version': 'condition-scope-v2-explicit',
+            'qualification_guard_version': 'shared-rule-time-v1',
         })
         for field, value in measured.items():
             self.assertEqual(actual[field], value)
