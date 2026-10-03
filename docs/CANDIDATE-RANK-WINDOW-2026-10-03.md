@@ -26,7 +26,7 @@ A report adds a small `coverage` object:
 
 `examined` counts ranks considered, including oversized items and items later removed from the final bundle. It is not the displayed count. `continue_offset` points after this examined window, rather than after the last displayed item. A null continuation means either all scanned matches were examined or the offset ceiling prevents another supported window; in the latter case `offset_limit_reached: true` is explicit. Callers can repeat the same window with a different supported budget if they need to inspect budget omissions.
 
-This is currently an internal Python continuation facility and **diagnostic coverage in MCP bundle responses**. The public MCP bundle does not accept an offset. An agent cannot yet use this field as a functioning MCP continuation cursor. The normal snapshot API remains available with its previous result-limit contract. Adding a public candidate-only continuation tool, or a true opaque pagination cursor, is a separate follow-up.
+This is currently an internal Python continuation facility and **diagnostic coverage in REST evidence-bundle responses**. The REST bundle does not accept an offset; the current nine-tool MCP has no evidence-bundle tool. An agent cannot yet use this field as a functioning remote continuation cursor. The normal snapshot API remains available with its previous result-limit contract. Adding a public candidate-only continuation tool, or a true opaque pagination cursor, is a separate follow-up.
 
 ## Cost limits that remain
 
