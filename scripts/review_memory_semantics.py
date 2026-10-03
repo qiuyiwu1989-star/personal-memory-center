@@ -9,6 +9,8 @@ from pathlib import Path
 import re
 
 VERSION = 'claim-semantic-review-v1'
+COVERAGE_VERSION = 'coverage-v2'
+KINDS = {'identity', 'preference', 'relationship', 'decision', 'plan', 'event', 'claim', 'suggestion'}
 DIMENSIONS = ('speaker', 'commitment', 'condition', 'time', 'source_alignment')
 CATEGORIES = {'owner_decision', 'third_party', 'conditional', 'correction', 'need_vs_plan'}
 VERDICTS = {'passed', 'failed', 'ambiguous', 'not_run'}
@@ -22,6 +24,32 @@ def digest(value):
 
 def _text(value):
     return isinstance(value, str) and bool(value.strip())
+
+
+def _coverage_contract(package, case_ids):
+    if 'coverage_contract' not in package:
+        return None
+    contract = package['coverage_contract']
+    if not isinstance(contract, dict) or contract.get('version') != COVERAGE_VERSION:
+        raise ValueError('Explicit supported coverage contract version required')
+    cases = contract.get('cases')
+    if not isinstance(cases, dict) or set(cases) != set(case_ids):
+        raise ValueError('Exact coverage contract case manifest required')
+    for case in cases.values():
+        units = case.get('units') if isinstance(case, dict) else None
+        if not isinstance(units, list) or not units:
+            raise ValueError('Nonempty source coverage units required')
+        ids = []
+        for unit in units:
+            if not isinstance(unit, dict) or not _text(unit.get('unit_id')):
+                raise ValueError('Unique nonempty source unit identifiers required')
+            ids.append(unit['unit_id'])
+            if (unit.get('disposition') not in ('must_capture', 'archive_only', 'ambiguous')
+                    or not _text(unit.get('rationale')) or not _text(unit.get('source_ref'))):
+                raise ValueError('Explicit source disposition, rationale and source_ref required')
+        if len(ids) != len(set(ids)):
+            raise ValueError('Duplicate source coverage unit')
+    return contract
 
 
 def validate(package):
@@ -41,6 +69,7 @@ def validate(package):
     ids = [c.get('case_id') for c in cases]
     if len(set(ids)) != len(ids) or set(ids) != set(expected):
         raise ValueError('Exact case coverage required, including not-run cases')
+    contract = _coverage_contract(package, expected)
     for case in cases:
         if case.get('category') not in CATEGORIES or not isinstance(case.get('source'), dict) or not case.get('source'):
             raise ValueError('Category and source JSON required')
@@ -66,12 +95,14 @@ def validate(package):
             raise ValueError('Candidate statements required')
         if output['execution_status'] == 'not_run' and claims:
             raise ValueError('Not-run output cannot contain generated claims')
+        if contract and any(not isinstance(c.get('kind'), str) or c['kind'] not in KINDS for c in claims):
+            raise ValueError('Coverage-v2 candidates require explicit legal kind')
     return {'case_ids': expected, 'categories': sorted({c['category'] for c in cases})}
 
 
 def freeze(package):
     coverage = validate(package)
-    return {'review_method': VERSION, 'review_tool_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+    return {'review_method': COVERAGE_VERSION if package.get('coverage_contract') else VERSION, 'review_tool_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             'package_sha256': digest(package),
             'method': package['method'], 'coverage': coverage,
             'quality_approved': False, 'status': 'frozen_not_run', 'model_calls': 0}
@@ -99,6 +130,50 @@ def _aggregate(labels):
     return next((v for v in ('failed', 'not_run', 'ambiguous') if v in states), 'passed')
 
 
+def _unit_coverage(case, units, submitted):
+    """Validate mapping records; submitted semantic labels remain attestations."""
+    if submitted is None:
+        submitted = {}
+    if not isinstance(submitted, dict) or set(submitted) - {'generated', 'delivered'}:
+        raise ValueError('Unknown coverage review stage')
+    expected = {u['unit_id'] for u in units}
+    claim_ids = {c['claim_id'] for c in case['output'].get('claims', [])}
+    stages = {}
+    for stage in ('generated', 'delivered'):
+        rows = submitted.get(stage, [])
+        if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
+            raise ValueError('Coverage review stage requires mapping list')
+        indexed = {}
+        for row in rows:
+            unit_id = row.get('unit_id')
+            if not _text(unit_id) or unit_id not in expected or unit_id in indexed:
+                raise ValueError('Duplicate/unknown coverage reviewed unit')
+            verdict = row.get('verdict')
+            refs = row.get('claim_ids')
+            if verdict not in ('captured', 'omitted', 'ambiguous', 'not_run') or not _text(row.get('rationale')):
+                raise ValueError('Explicit coverage verdict and rationale required')
+            if (not isinstance(refs, list) or any(not _text(r) for r in refs)
+                    or len(set(refs)) != len(refs) or set(refs) - claim_ids):
+                raise ValueError('Unique existing coverage claim references required')
+            if (verdict == 'captured' and not refs) or (verdict in ('omitted', 'not_run') and refs):
+                raise ValueError('Coverage verdict and claim references inconsistent')
+            if case['output']['execution_status'] != 'completed' and verdict != 'not_run':
+                raise ValueError('Incomplete generation cannot be scored as coverage output')
+            if verdict == 'captured':
+                if stage == 'delivered' and case['output']['delivery_status'] != 'accepted_candidate':
+                    raise ValueError('Unaccepted delivery cannot have captured coverage')
+            indexed[unit_id] = row
+        stages[stage] = [dict(indexed.get(u['unit_id'], {
+            'unit_id': u['unit_id'], 'verdict': 'not_run',
+            'rationale': 'No coverage review submitted.', 'claim_ids': []}), disposition=u['disposition']) for u in units]
+    required = [r for rows in stages.values() for r in rows if r['disposition'] == 'must_capture']
+    verdict = _aggregate([{'verdict': {'captured': 'passed', 'omitted': 'failed',
+        'ambiguous': 'ambiguous', 'not_run': 'not_run'}[r['verdict']]} for r in required])
+    return {'version': COVERAGE_VERSION, 'stages': stages, 'verdict': verdict,
+            'review_complete': all(r['verdict'] != 'not_run' for rows in stages.values() for r in rows),
+            'source_units_sha256': digest(units)}
+
+
 def score(package, review):
     coverage = validate(package)
     if review.get('package_sha256') != digest(package):
@@ -111,6 +186,7 @@ def score(package, review):
     if len(indexed) != len(rows) or set(indexed) - set(coverage['case_ids']):
         raise ValueError('Duplicate/unknown reviewed cases')
     results = []
+    contract = package.get('coverage_contract')
     for case in package['cases']:
         row = indexed.get(case['case_id'], {})
         submitted = row.get('claims', [])
@@ -129,20 +205,28 @@ def score(package, review):
             verdict = 'not_run'
         else:
             verdict = _aggregate(labels)
-        results.append({'case_id': case['case_id'], 'category': case['category'],
+        unit_review = None
+        if contract:
+            unit_review = _unit_coverage(case, contract['cases'][case['case_id']]['units'], row.get('coverage'))
+            verdict = _aggregate([{'verdict': verdict}, {'verdict': unit_review['verdict']}])
+        result = {'case_id': case['case_id'], 'category': case['category'],
                         'execution_status': case['output']['execution_status'],
                         'delivery_status': case['output']['delivery_status'],
                         'delivery_failure': case['output'].get('delivery_failure'),
                         'source_sha256': digest(case['source']), 'output_sha256': digest(case['output']),
                         'rubric_sha256': digest(case['rubric']), 'verdict': verdict,
-                        'dimensions': case_labels, 'claims': items})
+                        'dimensions': case_labels, 'claims': items}
+        if unit_review is not None:
+            result['unit_coverage'] = unit_review
+        results.append(result)
     counts = {v: sum(r['verdict'] == v for r in results) for v in sorted(VERDICTS)}
     complete = counts['passed'] == len(results)
     ready = (complete and package['data_kind'] == 'real_holdout' and package['independent_holdout']
              and reviewer['kind'] == 'human' and reviewer['independent']
              and set(coverage['categories']) == CATEGORIES
-             and all(c['output']['delivery_status'] == 'accepted_candidate' for c in package['cases']))
-    return {'review_method': VERSION, 'review_tool_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+             and all(c['output']['delivery_status'] == 'accepted_candidate' for c in package['cases'])
+             and (not contract or all(r['unit_coverage']['review_complete'] for r in results)))
+    return {'review_method': COVERAGE_VERSION if contract else VERSION, 'review_tool_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             'package_sha256': digest(package), 'review_input_sha256': digest(review),
             'method': package['method'], 'data_kind': package['data_kind'],
             'reviewer': reviewer, 'coverage': coverage, 'counts': counts, 'items': results,

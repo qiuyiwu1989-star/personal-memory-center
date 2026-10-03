@@ -60,10 +60,58 @@ S1 多条拆分必须使用各自足够的证据片段；不能从临时画图�
 
 ## 现有收据的最小兼容使用方案
 
-`scripts/review_memory_semantics.py` 已支持案例级遗漏与合理零候选审阅，但没有强制 `kind`、目标单元或覆盖映射字段，也不会验证上述字段的完整性。现有五维 schema 不允许新增第六个维度；不要向 `dimensions` 添加 `coverage` 或 `kind_consistency`。
+`scripts/review_memory_semantics.py` 的 v1 路径支持案例级遗漏与合理零候选审阅，但不强制 `kind`、目标单元或覆盖映射字段。现有五维 schema 不允许新增第六个维度；不要向 `dimensions` 添加 `coverage` 或 `kind_consistency`。
 
-本轮无需改脚本。生成 package 时完整保留原始 `kind`、证据与输出阶段；在来源 rubric 独立私有文件保留目标清单。在案例 `source_alignment.rationale` 引用冻结清单的 SHA256 并逐目标给映射结果，在 `commitment.rationale` 明写实际 kind、正文与来源的对照。若另存覆盖侧车，记录其哈希并与 package/receipt 关联，按私有追加收据方式保存。额外字段即使可被接受或计入哈希，也不会被现有工具语义校验，不能因此声称已机器验收。
+旧 v1 包继续按兼容方式记录：生成 package 时完整保留原始 `kind`、证据与输出阶段；在来源 rubric 独立私有文件保留目标清单。在案例 `source_alignment.rationale` 引用冻结清单的 SHA256 并逐目标给映射结果，在 `commitment.rationale` 明写实际 kind、正文与来源的对照。若另存覆盖侧车，记录其哈希并与 package/receipt 关联，按私有追加收据方式保存。额外字段即使可被接受或计入哈希，也不会被 v1 工具路径语义校验，不能因此声称已机器验收。
 
-若需要下一轮增强机器完整性，最小 v2 提案是可选但显式启用的 `coverage_contract`：验证唯一 unit_id、生成/交付阶段、只引用已存在 claim_id、每个必需目标有标签及理由；启用的包要求每条 claim 有合法 kind，缺值保留 not_run 或拒绝结构。保留 v1 的读取/评分行为，v2 单独标版本与工具哈希；只验证记录完整性，仍由审阅者判断长期价值与语义，不修改生产质量 gate。
+新增的最小 v2 实现是可选但显式启用的 `coverage_contract`：验证唯一 unit_id、生成/交付阶段、只引用已存在 claim_id；启用的包要求每条 claim 有合法 kind，缺值拒绝结构。保留 v1 的读取/评分行为，v2 单独标版本与工具哈希；只验证记录完整性，仍由审阅者判断长期价值与语义，不修改生产质量 gate。
+
+### 可选 coverage-v2 的具体 schema
+
+在 package 顶层加入以下内容。`cases` 的键须恰好覆盖 `expected_case_ids`；每例来源清单必须有至少一个单元，零候选案例也列出相应归档单元。单位标识在本例内唯一，不要求跨例唯一。
+
+```json
+{
+  "coverage_contract": {
+    "version": "coverage-v2",
+    "cases": {
+      "synthetic-case": {
+        "units": [{
+          "unit_id": "u1",
+          "disposition": "must_capture",
+          "rationale": "虚构案例中的持续边界。",
+          "source_ref": "synthetic://case#unit-1"
+        }]
+      }
+    }
+  }
+}
+```
+
+`disposition` 仅接受 `must_capture`、`archive_only`、`ambiguous`；理由和定位不得为空。开启 v2 后，`output.claims[]` 的 `kind` 须为现有八类之一，但合法类型不等于正确分类。
+
+在 review 的对应 `cases[]` 行中添加 `coverage`，独立记录两个阶段：
+
+```json
+{
+  "case_id": "synthetic-case",
+  "coverage": {
+    "generated": [{
+      "unit_id": "u1", "verdict": "captured",
+      "rationale": "虚构候选 c1 对应来源单元 u1。", "claim_ids": ["c1"]
+    }],
+    "delivered": [{
+      "unit_id": "u1", "verdict": "omitted",
+      "rationale": "虚构生成结果未交付。", "claim_ids": []
+    }]
+  }
+}
+```
+
+本示例还需要正常五维标签、输出状态与 claims 等已有字段，不能直接作为完整 package 使用。两个阶段仅接受 `captured`、`omitted`、`ambiguous`、`not_run`，提交行都必须有理由和 `claim_ids` 数组。captured 必须引用至少一条本例输出中已有候选，omitted/not_run 不得引用候选，ambiguous 可引用待判断候选。未知阶段、重复/未知 unit_id、重复/未知 claim_id 拒绝。生成 failed/not_run 时，两个阶段只能保留 not_run，不能把未生成评作遗漏或未决；未接受交付不能标 delivered captured。生成已完成但交付拒绝时，可记录 delivered omitted/ambiguous，并独立保留生成阶段评审。
+
+漏交某个阶段或单位审阅不补成成功，工具生成 `not_run` 标签并将 `review_complete=false`，阻断 ready。`must_capture` 的 omitted、ambiguous、not_run 分别并入案例 failed、ambiguous、not_run；所有必需单位 captured 才是该维记录的通过。archive_only 或来源 ambiguous 的归档/额外生成是否合理，由五维标签决定，机器不凭 disposition 自动裁决语义。仅补完覆盖记录不能把失败的五维评审转成通过。
+
+freeze 和 score 的 `review_method` 为 `coverage-v2`，输出每例 `unit_coverage`（来源单元哈希、两阶段标签、必需覆盖聚合、完整性标记），同时保留工具代码、来源、输出、rubric 和整个 package 的哈希。未开启 contract 的包继续使用 `claim-semantic-review-v1`，不新增 coverage 结果。两版均保留独立真实 holdout、人工审阅、五类、完整标签及已接受交付等 ready 前提，且永远不自动 approve、确认候选或连接生产。
 
 下一步先冻结新的真实正/负例目标清单，加入上述合成开发回归，随后以限定预算运行固定方法并独立复核。本文没有执行这些后续步骤。

@@ -30,6 +30,25 @@ def review(p, kind='synthetic_test'):
                                   for x in c['output']['claims']]} for c in p['cases']]}
 
 
+def coverage_package():
+    p = package()
+    p['coverage_contract'] = {'version': 'coverage-v2', 'cases': {c['case_id']: {'units': [
+        {'unit_id': 'u1', 'disposition': 'must_capture', 'rationale': 'Synthetic lasting boundary.',
+         'source_ref': 'synthetic://case#unit-1'}]} for c in p['cases']}}
+    for c in p['cases']:
+        c['output']['claims'][0]['kind'] = 'claim'
+    return p
+
+
+def coverage_review(p, kind='synthetic_test'):
+    r = review(p, kind)
+    for case in r['cases']:
+        case['coverage'] = {stage: [{'unit_id': 'u1', 'verdict': 'captured',
+            'rationale': 'Synthetic mapping attestation.', 'claim_ids': ['synthetic-claim']}]
+            for stage in ('generated', 'delivered')}
+    return r
+
+
 class SemanticReviewTest(unittest.TestCase):
     def test_synthetic_complete_cannot_approve_or_be_ready(self):
         p = package(); r = review(p); original = copy.deepcopy((p, r))
@@ -130,6 +149,120 @@ class SemanticReviewTest(unittest.TestCase):
             self.assertEqual(first.stat().st_mode & 0o777, 0o600)
         with self.assertRaisesRegex(ValueError, 'outside public'):
             save_receipt(result, Path(__file__).parent / 'not-created.json')
+
+    def test_v2_complete_mapping_keeps_approval_false_and_v1_unchanged(self):
+        p = coverage_package(); original = copy.deepcopy(p)
+        result = score(p, coverage_review(p))
+        self.assertEqual(result['review_method'], 'coverage-v2')
+        self.assertEqual(freeze(p)['review_method'], 'coverage-v2')
+        self.assertEqual(result['counts']['passed'], 5)
+        self.assertTrue(result['items'][0]['unit_coverage']['review_complete'])
+        self.assertFalse(result['quality_approved']); self.assertFalse(result['production_gate_changed'])
+        self.assertEqual(p, original)
+        legacy = package()
+        self.assertEqual(score(legacy, review(legacy))['review_method'], 'claim-semantic-review-v1')
+        self.assertNotIn('unit_coverage', score(legacy, review(legacy))['items'][0])
+
+    def test_v2_source_manifest_and_kind_must_be_complete(self):
+        mutations = (
+            lambda p: p['coverage_contract']['cases'].pop(p['expected_case_ids'][0]),
+            lambda p: p['coverage_contract']['cases'][p['expected_case_ids'][0]].update(units=[]),
+            lambda p: p['coverage_contract']['cases'][p['expected_case_ids'][0]]['units'][0].pop('source_ref'),
+            lambda p: p['coverage_contract']['cases'][p['expected_case_ids'][0]]['units'][0].update(disposition='guessed'),
+            lambda p: p['cases'][0]['output']['claims'][0].pop('kind'),
+            lambda p: p['cases'][0]['output']['claims'][0].update(kind='wish'),
+            lambda p: p['coverage_contract'].update(version='coverage-v999'),
+            lambda p: p.update(coverage_contract=None),
+        )
+        for change in mutations:
+            p = coverage_package(); change(p)
+            with self.assertRaises(ValueError): freeze(p)
+        p = coverage_package(); units = p['coverage_contract']['cases'][p['expected_case_ids'][0]]['units']
+        units.append(copy.deepcopy(units[0]))
+        with self.assertRaisesRegex(ValueError, 'Duplicate source'): freeze(p)
+
+    def test_v2_unknown_duplicate_units_claims_and_stage_rejected(self):
+        mutations = (
+            lambda r: r['cases'][0]['coverage']['generated'][0].update(unit_id='unknown'),
+            lambda r: r['cases'][0]['coverage']['generated'].append(copy.deepcopy(r['cases'][0]['coverage']['generated'][0])),
+            lambda r: r['cases'][0]['coverage']['generated'][0].update(claim_ids=['unknown']),
+            lambda r: r['cases'][0]['coverage'].update(approved=[]),
+            lambda r: r['cases'][0]['coverage']['generated'][0].update(rationale=''),
+            lambda r: r['cases'][0]['coverage']['generated'][0].update(claim_ids=[]),
+        )
+        for change in mutations:
+            p = coverage_package(); r = coverage_review(p); change(r)
+            with self.assertRaises(ValueError): score(p, r)
+
+    def test_v2_missing_unit_or_stage_remains_not_run(self):
+        for mutation in (lambda r: r['cases'][0]['coverage'].pop('generated'),
+                         lambda r: r['cases'][0]['coverage'].update(delivered=[]),
+                         lambda r: r['cases'][0].pop('coverage')):
+            p = coverage_package(); r = coverage_review(p); mutation(r)
+            item = score(p, r)['items'][0]
+            self.assertEqual(item['verdict'], 'not_run')
+            self.assertFalse(item['unit_coverage']['review_complete'])
+
+    def test_v2_required_omission_ambiguity_and_unreviewed_block_readiness(self):
+        for state, expected in [('omitted', 'failed'), ('ambiguous', 'ambiguous'), ('not_run', 'not_run')]:
+            p = coverage_package(); p.update(data_kind='real_holdout', independent_holdout=True)
+            r = coverage_review(p, 'human')
+            r['cases'][0]['coverage']['delivered'][0].update(verdict=state, claim_ids=[])
+            result = score(p, r)
+            self.assertEqual(result['items'][0]['verdict'], expected)
+            self.assertNotEqual(result['status'], 'ready_for_owner_review')
+        p = coverage_package(); p.update(data_kind='real_holdout', independent_holdout=True)
+        self.assertEqual(score(p, coverage_review(p, 'human'))['status'], 'ready_for_owner_review')
+
+    def test_v2_delivery_and_generation_states_cannot_fabricate_captured(self):
+        p = coverage_package(); p['cases'][0]['output'].update(delivery_status='rejected', delivery_failure='synthetic_guard')
+        with self.assertRaisesRegex(ValueError, 'Unaccepted delivery'): score(p, coverage_review(p))
+        r = coverage_review(p); r['cases'][0]['coverage']['delivered'][0].update(verdict='omitted', claim_ids=[])
+        item = score(p, r)['items'][0]
+        self.assertEqual(item['unit_coverage']['stages']['generated'][0]['verdict'], 'captured')
+        self.assertEqual(item['verdict'], 'failed')
+        p['cases'][0]['output'].update(execution_status='failed', delivery_status='not_attempted')
+        r = coverage_review(p); r['cases'][0].pop('dimensions'); r['cases'][0]['claims'] = []
+        with self.assertRaisesRegex(ValueError, 'Incomplete generation'): score(p, r)
+
+    def test_v2_archive_only_mapping_does_not_machine_infer_semantics(self):
+        p = coverage_package(); p.update(data_kind='real_holdout', independent_holdout=True)
+        for c in p['coverage_contract']['cases'].values(): c['units'][0]['disposition'] = 'archive_only'
+        r = coverage_review(p, 'human')
+        r['cases'][0]['coverage']['generated'][0].update(verdict='omitted', claim_ids=[])
+        self.assertEqual(score(p, r)['status'], 'ready_for_owner_review')
+        r['cases'][0]['coverage']['generated'] = []
+        result = score(p, r)
+        self.assertEqual(result['items'][0]['verdict'], 'passed')
+        self.assertFalse(result['items'][0]['unit_coverage']['review_complete'])
+        self.assertNotEqual(result['status'], 'ready_for_owner_review')
+
+    def test_v2_zero_candidates_require_archive_review_or_record_omission(self):
+        p = coverage_package(); p['cases'][0]['output']['claims'] = []
+        r = coverage_review(p)
+        for stage in ('generated', 'delivered'):
+            r['cases'][0]['coverage'][stage][0].update(verdict='omitted', claim_ids=[])
+        self.assertEqual(score(p, r)['items'][0]['verdict'], 'failed')
+        unit = p['coverage_contract']['cases'][p['cases'][0]['case_id']]['units'][0]
+        unit['disposition'] = 'archive_only'; r['package_sha256'] = digest(p)
+        self.assertEqual(score(p, r)['items'][0]['verdict'], 'passed')
+        r['cases'][0].pop('dimensions')
+        self.assertEqual(score(p, r)['items'][0]['verdict'], 'not_run')
+
+    def test_v2_uncompleted_output_cannot_be_scored_as_omitted_or_ambiguous(self):
+        for state in ('failed', 'not_run'):
+            for stage in ('generated', 'delivered'):
+                for verdict in ('omitted', 'ambiguous'):
+                    p = coverage_package()
+                    p['cases'][0]['output'].update(execution_status=state, delivery_status='not_run', claims=[])
+                    r = coverage_review(p); r['cases'][0].pop('dimensions'); r['cases'][0]['claims'] = []
+                    for s in ('generated', 'delivered'):
+                        r['cases'][0]['coverage'][s][0].update(verdict='not_run', claim_ids=[])
+                    r['cases'][0]['coverage'][stage][0]['verdict'] = verdict
+                    with self.assertRaisesRegex(ValueError, 'Incomplete generation'):
+                        score(p, r)
+                    r['cases'][0]['coverage'][stage][0]['verdict'] = 'not_run'
+                    self.assertEqual(score(p, r)['items'][0]['verdict'], 'not_run')
 
 
 if __name__ == '__main__': unittest.main()
