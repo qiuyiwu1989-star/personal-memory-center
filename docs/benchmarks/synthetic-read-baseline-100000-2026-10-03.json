@@ -1,0 +1,69 @@
+{
+  "synthetic": true,
+  "backend": "SQLite",
+  "python": "3.12.14",
+  "platform": "macOS-26.5.1-arm64-arm-64bit",
+  "records": 100000,
+  "sources": 1,
+  "verified_fraction": 0.01,
+  "query": "Atlas",
+  "repeats": 3,
+  "index_state": "source discovery not rebuilt; raw evidence unavailable; no model calls",
+  "context": {
+    "observations": [
+      {
+        "seconds": 7.712106,
+        "selects": 4,
+        "response_chars": 1168,
+        "response_sha256": "2432c83691a1c037902607ebc39a3f63af8fc3be75e15e234960097dcc525893",
+        "trusted_total": 1000
+      },
+      {
+        "seconds": 1.941153,
+        "selects": 4,
+        "response_chars": 1168,
+        "response_sha256": "2432c83691a1c037902607ebc39a3f63af8fc3be75e15e234960097dcc525893",
+        "trusted_total": 1000
+      },
+      {
+        "seconds": 1.880119,
+        "selects": 4,
+        "response_chars": 1168,
+        "response_sha256": "2432c83691a1c037902607ebc39a3f63af8fc3be75e15e234960097dcc525893",
+        "trusted_total": 1000
+      }
+    ],
+    "p50_seconds_untraced": 1.910636,
+    "p95_seconds_descriptive_max_untraced": 1.941153,
+    "tracemalloc_peak_bytes": 225323109
+  },
+  "bundle": {
+    "observations": [
+      {
+        "seconds": 149.616946,
+        "selects": 10,
+        "response_chars": 5622,
+        "response_sha256": "9d4e571e4d89201b5e2751a39f7798d382f5ab00724c681d48ad9b0274da770e",
+        "trusted_total": 1000
+      },
+      {
+        "seconds": 15.49827,
+        "selects": 10,
+        "response_chars": 5622,
+        "response_sha256": "9d4e571e4d89201b5e2751a39f7798d382f5ab00724c681d48ad9b0274da770e",
+        "trusted_total": 1000
+      },
+      {
+        "seconds": 15.527566,
+        "selects": 10,
+        "response_chars": 5622,
+        "response_sha256": "9d4e571e4d89201b5e2751a39f7798d382f5ab00724c681d48ad9b0274da770e",
+        "trusted_total": 1000
+      }
+    ],
+    "p50_seconds_untraced": 15.512918,
+    "p95_seconds_descriptive_max_untraced": 15.527566,
+    "tracemalloc_peak_bytes": 225332147
+  },
+  "process_peak_rss_bytes": 511180800
+}

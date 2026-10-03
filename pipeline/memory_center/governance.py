@@ -29,7 +29,7 @@ def metadata(row, stored=None):
         return dict(stored)
     return {'record_id': row['id'], 'holder': None, 'subject_id': None,
             'as_of': None, 'valid_until': None,
-            'state': 'owner_corrected' if row['message_id'] == 'correction' else 'candidate',
+            'state': 'candidate',
             'priority': 'P3', 'revision': 0, 'note': '', 'reviewed': None}
 
 
@@ -70,16 +70,27 @@ def review(store, principal, record_id, body):
 
 
 def usable(row, today=None):
-    g = row['governance']
-    date = today or datetime.date.today().isoformat()
-    return (not g['as_of'] or g['as_of'] <= date) and row['lifecycle'] == 'active' and g['state'] in ('verified','owner_corrected') and (
-        not g['valid_until'] or g['valid_until'] > (today or datetime.date.today().isoformat()))
+    """Only explicitly reviewed, structurally complete current judgments load.
+
+    Legacy owner_corrected remains visible in history, never implicit approval.
+    Read validation fails closed without repairing or rewriting stored metadata.
+    """
+    g = row.get('governance') or {}
+    if row.get('lifecycle') != 'active' or g.get('state') != 'verified':
+        return False
+    try:
+        values = normalize({key: g[key] for key in (
+            'holder','subject_id','as_of','valid_until','state','priority','note') if key in g})
+        date = today or datetime.date.today().isoformat()
+        return values['as_of'] <= date and (not values['valid_until'] or values['valid_until'] > date)
+    except (Invalid, TypeError, ValueError):
+        return False
 
 
 def context(store, principal, scope, query, max_chars=1600, retrieval_mode='lexical-v1'):
     if type(max_chars) is not int or not 500 <= max_chars <= 16000:
         raise Invalid('读取预算需为 500–16000 字符')
-    snapshot = store.snapshot(principal,scope,query,limit=1000000,retrieval_mode=retrieval_mode)
+    snapshot = store.snapshot(principal,scope,query,limit=1000000,retrieval_mode=retrieval_mode,governance_filter='usable',include_jobs=False)
     from .retrieval_ranking import score_record, score_record_v3
     rows = sorted((r for r in snapshot['records'] if usable(r)),
                   key=lambda r:(-(score_record_v3(r,query) if retrieval_mode=='lexical-v3' else score_record(r,query)),r['governance']['priority'],r['id']) if query.strip() and retrieval_mode in ('lexical-v2','lexical-v3') else (0,r['governance']['priority']) + (r['id'],))
@@ -90,7 +101,7 @@ def context(store, principal, scope, query, max_chars=1600, retrieval_mode='lexi
     revision = hashlib.sha256(encoded([principal['owner'],scope,query,retrieval_mode,max_chars,versions]).encode()).hexdigest()[:24]
     result = {'scope':scope, 'context_revision':revision, 'etag':'"'+revision+'"',
               'records': [], 'total': len(rows), 'truncated': bool(rows),
-              'policy': 'verified-or-owner-corrected-v1', 'retrieval':retrieval_mode}
+              'policy': 'explicit-verified-v2', 'retrieval':retrieval_mode}
     if len(encoded(result)) > max_chars:
         raise Invalid('读取范围或检索标识超过响应预算')
     for row in rows:

@@ -112,3 +112,39 @@ def modality_problem(quote, statement, kind):
         if re.search(r'(?:不|并不|没有)'+verb, quote) and verb in statement and not re.search(r'(?:不|并不|没有)'+verb, statement):
             return '否定意愿不能改写为肯定意愿'
     return None
+
+
+SCOPED_GUARD_VERSION = 'condition-scope-v1'
+
+
+def scoped_evidence_ranges(text):
+    """v17 only: isolate an explicitly independent requirement at a hard boundary.
+
+    This is deliberately not a general Chinese scope parser. A repeated subject,
+    另外/总之, or a new object alone does not release a preceding condition.
+    Independence must be declared with a concrete named project. Quoted words,
+    lists, subordinate pronouns and ambiguous same-project recaps stay together.
+    Original offsets and all preceding context remain available as separate spans.
+    """
+    if not CONDITION.search(text):
+        return evidence_ranges(text)
+    if LIST.search(text) or re.search(r'说|表示|写道|来信|访谈|转发|以下|下面|\b(?:said|says|letter|email|account from)\b',text,re.I):
+        return [(0, len(text))] if text else []
+    # Explicit, narrow author declaration; no heading/quotation/third-party text.
+    independent = re.compile(
+        r'\s*(?:另外，)?我对另一(?:个)?独立项目\s+[A-Za-z][A-Za-z0-9_-]*\s*的要求是[:：，,]')
+    stack=[];cuts=[]
+    pairs={'(':')','（':'）','[':']','【':'】','“':'”','「':'」','《':'》','"':'"'}
+    for index,char in enumerate(text):
+        if stack and char==stack[-1]:
+            stack.pop()
+        elif char in pairs:
+            stack.append(pairs[char])
+        elif not stack and char in '。！？!?':
+            suffix=text[index+1:]
+            if independent.match(suffix) and not CONDITION.search(suffix):
+                cuts.append(index+1)
+    if not cuts:
+        return [(0,len(text))] if text else []
+    positions=[0,*cuts,len(text)]
+    return [(begin,end) for begin,end in zip(positions,positions[1:]) if begin<end]

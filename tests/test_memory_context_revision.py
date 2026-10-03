@@ -15,7 +15,9 @@ class ContextRevisionTest(unittest.TestCase):
     def corrected(self,statement='Synthetic corrected statement.'):
         self.ingest()
         row=self.rows()[0]
-        return self.store.correct(self.owner,row['id'],{'revision':row['revision'],'statement':statement})
+        result=self.store.correct(self.owner,row['id'],{'revision':row['revision'],'statement':statement})
+        review(self.store,self.owner,result['id'],{'revision':1,'state':'verified','holder':'owner:q','subject_id':'owner:q','as_of':'2000-01-01'})
+        return result
 
     def test_repeat_is_stable_correction_and_rejection_change_marker(self):
         revised=self.corrected()
@@ -25,10 +27,12 @@ class ContextRevisionTest(unittest.TestCase):
         self.assertEqual(first['scope'],'personal')
         self.assertEqual(first['etag'],'"'+first['context_revision']+'"')
         newer=self.store.correct(self.owner,revised['id'],{'revision':2,'statement':'Synthetic new correction.'})
+        self.assertEqual(context(self.store,reader,'personal','')['records'],[])
+        review(self.store,self.owner,newer['id'],{'revision':1,'state':'verified','holder':'owner:q','subject_id':'owner:q','as_of':'2000-01-01'})
         second=context(self.store,reader,'personal','')
         self.assertNotEqual(first['context_revision'],second['context_revision'])
         self.assertEqual(second['records'][0]['id'],newer['id'])
-        review(self.store,self.owner,newer['id'],{'revision':0,'state':'rejected'})
+        review(self.store,self.owner,newer['id'],{'revision':2,'state':'rejected'})
         third=context(self.store,reader,'personal','')
         self.assertEqual(third['records'],[])
         self.assertNotEqual(second['etag'],third['etag'])
@@ -76,7 +80,7 @@ class ContextRevisionTest(unittest.TestCase):
         rid=self.rows()[0]['id']
         before=context(self.store,self.owner,'personal','',500)
         self.assertEqual(before['records'],[])
-        review(self.store,self.owner,rid,{'revision':0,'state':'verified','holder':'owner:q',
+        review(self.store,self.owner,rid,{'revision':2,'state':'verified','holder':'owner:q',
               'subject_id':'owner:q','as_of':'2000-01-01','priority':'P0'})
         after=context(self.store,self.owner,'personal','',500)
         self.assertEqual(after['records'],[])

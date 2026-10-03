@@ -37,10 +37,21 @@ def search_page(snapshot,max_chars=6000):
     """Bound the full JSON candidate response, including envelope and escaping."""
     if type(max_chars) is not int or not 500<=max_chars<=16000:raise Invalid('检索预算无效')
     result={'records':[],'total':snapshot['total'],'truncated':True}
+    base_size=len(encoded(result));items_size=0
+    # Exact JSON length arithmetic preserves whole-item/skip-oversize behavior
+    # without repeatedly encoding all already selected rows for every match.
+    fields=('id','statement','subject','status','source_id','message_id','source_date','revision','governance')
+    minimum={key:'' for key in fields};minimum.update(revision=0,governance={})
+    lower_bound=len(encoded(minimum))
     for row in snapshot['records']:
-        item={k:row[k] for k in ('id','statement','subject','status','source_id','message_id','source_date','revision','governance')}
-        candidate=dict(result,records=result['records']+[item])
-        candidate['truncated']=len(candidate['records'])<snapshot['total']
-        if len(encoded(candidate))<=max_chars:result=candidate
+        count=len(result['records'])+1
+        overhead=base_size+items_size+2*(count-1)
+        if overhead+lower_bound>max_chars:break
+        item={key:row[key] for key in fields}
+        size=len(encoded(item))
+        truncated=count<snapshot['total']
+        # JSON false is one character longer than true.
+        if overhead+size+(0 if truncated else 1)<=max_chars:
+            result['records'].append(item);items_size+=size
     result['truncated']=len(result['records'])<snapshot['total']
     return result

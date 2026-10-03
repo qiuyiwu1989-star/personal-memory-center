@@ -24,7 +24,7 @@ class VisibilityTest(unittest.TestCase):
         (plan,usage),calls=self.invoke(messages,respond,metadata)
         self.assertEqual(metadata,before)
         self.assertEqual(len(calls),1)
-        self.assertEqual(usage['method_version'],'2026-10-02.16')
+        self.assertEqual(usage['method_version'],'2026-10-03.17')
         self.assertEqual(usage['source_visibility']['status'],'visible_only')
         self.assertEqual(plan['claims'][0]['quote'],messages[0]['text'])
 

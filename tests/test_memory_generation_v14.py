@@ -89,7 +89,7 @@ class GenerationV14Test(unittest.TestCase):
         (plan, usage), requests = self.invoke(messages, respond)
         self.assertEqual(len(requests), 1)
         self.assertEqual(requests[0]['messages'][0], {'role': 'system', 'content': PROMPT})
-        self.assertEqual(PROMPT_VERSION, '2026-10-02.16')
+        self.assertEqual(PROMPT_VERSION, '2026-10-03.17')
         self.assertEqual(usage['method_version'], PROMPT_VERSION)
         self.assertEqual(usage['total_tokens'], 50)
         self.assertEqual(plan['claims'][0]['quote'], text)
@@ -101,7 +101,7 @@ class GenerationV14Test(unittest.TestCase):
         with self.assertRaises(ModelOutputError) as raised:
             self.invoke(messages, lambda payload: {'claims': [{
                 'evidence_id': 'invented-assistant-evidence', 'statement': '已完成。'}]})
-        self.assertEqual(raised.exception.usage['method_version'], '2026-10-02.16')
+        self.assertEqual(raised.exception.usage['method_version'], '2026-10-03.17')
         self.assertEqual(raised.exception.usage['total_tokens'], 50)
 
     def test_no_extractable_source_avoids_network_and_reports_new_method(self):
@@ -114,7 +114,7 @@ class GenerationV14Test(unittest.TestCase):
         opener.assert_not_called()
         self.assertEqual(plan, {'claims': []})
         self.assertTrue(usage['model_skipped'])
-        self.assertEqual(usage['method_version'], '2026-10-02.16')
+        self.assertEqual(usage['method_version'], '2026-10-03.17')
         self.assertEqual(usage['total_tokens'], 0)
 
 

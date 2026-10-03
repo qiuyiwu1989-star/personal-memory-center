@@ -259,57 +259,76 @@ class Store:
                 settle(db, attempt, usage)
         return True
 
-    def snapshot(self, principal, scope, query='', history=False, limit=100, governance_filter=None, retrieval_mode='lexical-v1'):
+    def snapshot(self, principal, scope, query='', history=False, limit=100, governance_filter=None, retrieval_mode='lexical-v1', include_jobs=True):
         permit(principal, scope, 'read')
         if not isinstance(query, str) or len(query) > 500:
             raise Invalid('查询上限 500 字符')
-        with self.db() as db:
-            rows = [dict(r) for r in db.execute('SELECT r.*,s.source_key,s.source_type,s.payload source_payload,j.usage processing_usage '
-                    'FROM records r JOIN sources s ON s.id=r.source_id LEFT JOIN jobs j ON j.source_id=s.id '
-                    'WHERE r.owner=? AND r.scope=? '
-                    + ('' if history else "AND r.lifecycle='active' ") + 'ORDER BY r.created DESC', (principal['owner'], scope))]
-            jobs = [dict(r) for r in db.execute('SELECT j.*,s.payload source_payload,s.source_key FROM jobs j JOIN sources s ON s.id=j.source_id '
-                    'WHERE s.owner=? AND s.scope=? ORDER BY j.created DESC LIMIT 40', (principal['owner'], scope))]
-        from .governance import metadata, usable
-        with self.db() as db:
-            governed = {r['record_id']: dict(r) for r in db.execute('SELECT g.* FROM record_governance g JOIN records r ON r.id=g.record_id WHERE r.owner=? AND r.scope=?', (principal['owner'], scope))}
-        with self.db() as db:
-            translations = {r['record_id']:r['text'] for r in db.execute("SELECT t.record_id,t.text FROM record_translations t JOIN records r ON r.id=t.record_id WHERE r.owner=? AND r.scope=? AND t.language='zh'", (principal['owner'],scope))}
-        for row in rows:
-            row['display_statement'] = translations.get(row['id'],row['statement'])
-            row['translated'] = row['id'] in translations
-            row['governance'] = metadata(row, governed.get(row['id']))
-            row['usable'] = usable(row)
-            messages = json.loads(row.pop('source_payload'))
-            evidence = next((m for m in messages if m['id'] == row['message_id']), {})
-            row['source_title'] = evidence.get('source_title', row['source_key'])
-            row['source_date'] = evidence.get('created_at')
-            from .claim_context import evidence_context
-            row['evidence_context'] = evidence_context(evidence,row['source_type'])
-            from .modality import evidence_modality
-            row['modality'] = evidence_modality(row['quote'])
-            usage = json.loads(row.pop('processing_usage') or 'null') or {}
-            row['review_note'] = (usage.get('review_notes') or {}).get(row['statement'])
-            row['quality_note'] = (usage.get('quality_review_notes') or {}).get(row['statement'])
-            row['processing_method'] = usage.get('method', 'llm' if row['message_id'] != 'correction' else 'owner_correction')
-        from .retrieval_ranking import search_records
         if retrieval_mode not in ('lexical-v1','lexical-v2','lexical-v3'):raise Invalid('检索模式无效')
+        if governance_filter and governance_filter not in ('candidate','verified','owner_corrected','historical','rejected','usable','history'):
+            raise Invalid('治理筛选无效')
+        if type(include_jobs) is not bool:raise Invalid('任务读取选项无效')
+        # Filter governance in SQL before source hydration. Python remains the
+        # authority for usable/date semantics; this is a conservative prefilter.
+        where='r.owner=? AND r.scope=? '
+        params=[principal['owner'],scope]
+        if not history:where+="AND r.lifecycle='active' "
+        if governance_filter=='usable':
+            where+="AND g.state='verified' AND g.holder IS NOT NULL AND g.holder<>'' AND g.subject_id IS NOT NULL AND g.subject_id<>'' AND g.as_of IS NOT NULL AND g.as_of<>'' "
+        elif governance_filter=='history':where+="AND (g.state='historical' OR r.lifecycle<>'active') "
+        elif governance_filter:
+            where+="AND COALESCE(g.state,'candidate')=? "
+            params.append(governance_filter)
+        fields=('record_id','holder','subject_id','as_of','valid_until','state','priority','revision','note','reviewed')
+        governance_columns=','.join('g.'+key+' governance_'+key for key in fields)
+        with self.db() as db:
+            rows=[dict(r) for r in db.execute('SELECT r.*,s.source_key,s.source_type,t.text translated_text,'+governance_columns+
+                ' FROM records r JOIN sources s ON s.id=r.source_id LEFT JOIN record_governance g ON g.record_id=r.id '
+                "LEFT JOIN record_translations t ON t.record_id=r.id AND t.language='zh' WHERE "+where+'ORDER BY r.created DESC',params)]
+            jobs=[dict(r) for r in db.execute('SELECT j.*,s.source_key FROM jobs j JOIN sources s ON s.id=j.source_id '
+                'WHERE s.owner=? AND s.scope=? ORDER BY j.created DESC LIMIT 40',(principal['owner'],scope))] if include_jobs else []
+            # Fetch each selected source once. Do not duplicate its payload for
+            # every record or parse a multi-message source once per record.
+            source_ids=list(dict.fromkeys([r['source_id'] for r in rows]+[j['source_id'] for j in jobs]))
+            source_context={}
+            for start in range(0,len(source_ids),400):
+                batch=source_ids[start:start+400];marks=','.join('?' for _ in batch)
+                for raw in db.execute('SELECT s.id,s.payload,j.usage FROM sources s LEFT JOIN jobs j ON j.source_id=s.id '
+                    'WHERE s.owner=? AND s.scope=? AND s.id IN ('+marks+')',(principal['owner'],scope,*batch)):
+                    messages=json.loads(raw['payload'])
+                    source_context[raw['id']]=({m['id']:m for m in messages},messages[0] if messages else {},json.loads(raw['usage'] or 'null') or {})
+        from .governance import metadata, usable
+        from .claim_context import evidence_context
+        from .modality import evidence_modality
+        for row in rows:
+            translated=row.pop('translated_text')
+            row['display_statement']=translated if translated is not None else row['statement']
+            row['translated']=translated is not None
+            governed={key:row.pop('governance_'+key) for key in fields}
+            row['governance']=metadata(row,governed if governed['record_id'] is not None else None)
+            row['usable']=usable(row)
+            messages,first,usage=source_context[row['source_id']]
+            evidence=messages.get(row['message_id'],{})
+            row['source_title']=evidence.get('source_title',row['source_key'])
+            row['source_date']=evidence.get('created_at')
+            row['evidence_context']=evidence_context(evidence,row['source_type'])
+            row['modality']=evidence_modality(row['quote'])
+            row['review_note']=(usage.get('review_notes') or {}).get(row['statement'])
+            row['quality_note']=(usage.get('quality_review_notes') or {}).get(row['statement'])
+            row['processing_method']=usage.get('method','llm' if row['message_id']!='correction' else 'owner_correction')
+        from .retrieval_ranking import search_records
         rows=search_records(rows,query,retrieval_mode)
         if governance_filter:
-            if governance_filter not in ('candidate','verified','owner_corrected','historical','rejected','usable','history'):
-                raise Invalid('治理筛选无效')
             rows=[r for r in rows if (r['usable'] if governance_filter=='usable' else (r['governance']['state']=='historical' or r['lifecycle']!='active') if governance_filter=='history' else r['governance']['state']==governance_filter)]
         status_counts={}
         for row in rows:status_counts[row['status']]=status_counts.get(row['status'],0)+1
         for job in jobs:
-            source_messages = json.loads(job.pop('source_payload'))
-            job['source_title'] = source_messages[0].get('source_title', job['source_key']) if source_messages else job['source_key']
-            job.pop('lease', None)
-            job['usage'] = json.loads(job['usage']) if job['usage'] else None
-            if isinstance(job['usage'], dict):
-                job['usage'].pop('review_notes', None)
-        return {'records': rows[:limit], 'total': len(rows), 'truncated': len(rows) > limit,
-                'status_counts':status_counts,'jobs': jobs, 'scope': scope, 'retrieval': retrieval_mode, 'generated_at': time.time()}
+            _,first,_=source_context[job['source_id']]
+            job['source_title']=first.get('source_title',job['source_key'])
+            job.pop('lease',None)
+            job['usage']=json.loads(job['usage']) if job['usage'] else None
+            if isinstance(job['usage'],dict):job['usage'].pop('review_notes',None)
+        return {'records':rows[:limit],'total':len(rows),'truncated':len(rows)>limit,
+                'status_counts':status_counts,'jobs':jobs,'scope':scope,'retrieval':retrieval_mode,'generated_at':time.time()}
 
     def materials(self, principal, offset=0, limit=40):
         """Owner workbench inventory. Keep source payloads out of the list response."""
@@ -358,9 +377,13 @@ class Store:
         return result
 
     def correct(self, principal, rid, body):
-        # Correction is explicit owner input, never a model-invented update operation.
-        if not principal.get('trusted_user'):
+        # Editing a report is not confirmation of its current truth or attribution.
+        if principal.get('trusted_user') is not True:
             raise PermissionError('仅本人凭据可纠正')
+        if not isinstance(body, dict) or set(body) - {'statement','revision','change_kind','previous_valid_until'}:
+            raise Invalid('纠正字段无效；核实请使用本人审核入口')
+        if type(body.get('revision')) is not int or body['revision'] < 1:
+            raise Invalid('需要有效的记录 revision')
         statement = body.get('statement')
         if not isinstance(statement, str) or not 1 <= len(statement.strip()) <= 2000:
             raise Invalid('纠正文需 1–2000 字符')
@@ -372,6 +395,9 @@ class Store:
             permit(principal, row['scope'], 'write')
             if row['lifecycle'] != 'active' or body.get('revision') != row['revision']:
                 raise Conflict('记录已变化，请刷新后再纠正')
+            from .governance import metadata
+            from .judgment_contract import normalize
+            previous = metadata(row, db.execute('SELECT * FROM record_governance WHERE record_id=?',(rid,)).fetchone())
             sid, newid = uid(), uid()
             payload = encoded([{'id': 'correction', 'role': 'user', 'text': statement}])
             db.execute('INSERT INTO sources VALUES(?,?,?,?,?,?,?,?,?,?)',
@@ -384,10 +410,11 @@ class Store:
             db.execute('INSERT INTO events VALUES(?,?,?,?,?,?)',
                        (uid(), newid, principal['id'], 'correction', rid, time.time()))
             from .temporal import record as audit_change, request as temporal_request
-            from .governance import metadata
+            from .owner_memory import _governance
+            governance = _governance(db, principal, newid, normalize({}), previous, time.time())
             audit_change(self, db, principal, row['scope'], newid, rid, row['revision'] + 1,
-                         metadata({'id': newid, 'message_id': 'correction'}),
-                         'legacy-correction:' + newid, temporal_request(body))
+                         governance,
+                         'legacy-correction:' + newid, temporal_request(body), previous_governance=previous)
             return {'id': newid, 'revision': row['revision'] + 1}
 
     def retry(self, principal, jid):
@@ -454,10 +481,10 @@ def validate_plan(plan, source):
         elif message['role'] == 'user' and source['trusted_user']:
             status = 'user_stated'
         from .claim_context import evidence_context, contains_immediate_command, statement_has_date
-        if source.get('processing_method_version') in ('2026-10-01.6','2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16'):
+        if source.get('processing_method_version') in ('2026-10-01.6','2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17'):
             context = evidence_context(message,source['source_type'])
             semantic_statement = c['statement']
-            if source.get('processing_method_version') in ('2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16') and source['source_type']!='imported_summary':
+            if source.get('processing_method_version') in ('2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17') and source['source_type']!='imported_summary':
                 prefix = ('来源消息日期：'+context['source_date']+'（非事件成立时间，当前有效性待核实）。') if context['source_date'] else ''
                 if c['topic']=='projects' and context['conversation_title']:
                     prefix += '来源对话：'+context['conversation_title']+'。'
@@ -474,13 +501,13 @@ def validate_plan(plan, source):
                     raise Invalid('历史陈述必须保留来源日期，不能把历史要求当成当前状态')
                 if c['topic']=='projects' and context['conversation_title'] and context['conversation_title'] not in c['statement']:
                     raise Invalid('项目陈述必须保留来源对话标题，不能猜测项目身份或使用模糊指代')
-            elif source.get('processing_method_version') in ('2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16') and '原始时间未知' not in c['statement']:
+            elif source.get('processing_method_version') in ('2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17') and '原始时间未知' not in c['statement']:
                 raise Invalid('摘要更新时间不能充当事件时间，请明确原始时间未知')
             elif not c['statement'].startswith(('摘要记载','摘要主张')):
                 raise Invalid('二手摘要必须明确归属，不能升格为本人陈述')
         from .modality import evidence_modality, modality_problem
         mode = evidence_modality(c['quote'])
-        if source.get('processing_method_version') in ('2026-10-01.14','2026-10-02.15','2026-10-02.16'):
+        if source.get('processing_method_version') in ('2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17'):
             problem = modality_problem(c['quote'], semantic_statement, c['kind'])
             if problem:
                 raise Invalid(problem)

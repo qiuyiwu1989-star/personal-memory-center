@@ -42,6 +42,9 @@ class GovernanceTest(unittest.TestCase):
         self.assertEqual(context(self.store,self.owner,'personal','')['records'],[])
         self.store.correct(self.owner,row['id'],{'revision':1,'statement':'先看数据。'})
         other=dict(self.owner,id='second-agent',trusted_user=False)
+        self.assertEqual(context(self.store,other,'personal','')['records'],[])
+        corrected=self.rows()[0]
+        review(self.store,self.owner,corrected['id'],{'revision':1,'state':'verified','holder':'owner:q','subject_id':'owner:q','as_of':'2000-01-01'})
         self.assertEqual(context(self.store,other,'personal','')['records'][0]['statement'],'先看数据。')
 
     def test_review_permissions_dates_history_and_stale_write(self):

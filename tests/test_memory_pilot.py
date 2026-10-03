@@ -40,6 +40,8 @@ class PilotTest(unittest.TestCase):
         original=self.row
         revised=self.store.correct(OWNER,original['id'],{'revision':original['revision'],
                      'statement':'Synthetic correction: read the evidence first.'})
+        self.assertEqual(context(self.store,READER,SCOPE,'')['records'],[])
+        review(self.store,OWNER,revised['id'],{'revision':1,'state':'verified','holder':'owner:pilot','subject_id':'owner:pilot','as_of':'2000-01-01'})
         current=context(self.store,READER,SCOPE,'')
         self.assertEqual([r['id'] for r in current['records']],[revised['id']])
         history=self.store.snapshot(OWNER,SCOPE,history=True)['records']
