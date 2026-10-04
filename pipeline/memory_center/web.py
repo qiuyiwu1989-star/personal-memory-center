@@ -35,6 +35,7 @@ def load_grants(path):
 
 def blueprint(store, grants, model, browser_principal=None, credential_manager=None):
     bp = Blueprint('memory_center', __name__, url_prefix=PREFIX)
+    if isinstance(model, Model): model.store = store
 
     @bp.before_request
     def authenticate():
@@ -76,6 +77,50 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
         if not isinstance(data, dict):
             raise Invalid('请求应为 JSON 对象')
         return data
+
+    @bp.get('/configuration')
+    def configuration_list():
+        from .configuration import listing
+        return jsonify(listing(store,g.memory_principal,request.args.get('scope','personal')))
+
+    @bp.post('/configuration/versions')
+    def configuration_draft():
+        from .configuration import draft
+        data=body();scope=data.pop('scope','personal')
+        return jsonify(draft(store,g.memory_principal,scope,data)),201
+
+    @bp.post('/configuration/versions/<version_id>/activate')
+    def configuration_activate(version_id):
+        from .configuration import activate
+        data=body();scope=data.pop('scope','personal')
+        return jsonify(activate(store,g.memory_principal,scope,version_id,data))
+
+    @bp.get('/source')
+    def source_message():
+        from .reading import source_page
+        p=g.memory_principal
+        with store.db() as db:
+            row=db.execute('SELECT * FROM sources WHERE id=? AND owner=?',(request.args.get('source_id'),p['owner'])).fetchone()
+        if not row:raise Invalid('来源不存在')
+        permit(p,row['scope'],'source_read')
+        try:
+            offset=int(request.args.get('offset','0'));max_chars=int(request.args.get('max_chars','4000'))
+        except ValueError:raise Invalid('原文分页参数无效') from None
+        for message in json.loads(row['payload']):
+            if message['id']==request.args.get('message_id'):
+                return jsonify(source_page(row['source_key'],message,offset,max_chars))
+        raise Invalid('消息不存在')
+
+    @bp.get('/memory-map')
+    def memory_map():
+        from .visual_map import build
+        def number(name,default):
+            raw=request.args.get(name,str(default))
+            if not raw.isascii() or not raw.isdecimal():raise Invalid('分页参数无效')
+            try:return int(raw)
+            except ValueError:raise Invalid('分页参数无效') from None
+        return jsonify(build(store,g.memory_principal,request.args.get('scope','personal'),
+            request.args.get('q',''),request.args.get('state',''),number('offset',0),number('limit',40)))
 
     @bp.get('/status')
     def status():
@@ -384,6 +429,7 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
 
 
 def start_worker(store, model):
+    if isinstance(model, Model): model.store = store
     import logging
     stop = threading.Event()
     def work():

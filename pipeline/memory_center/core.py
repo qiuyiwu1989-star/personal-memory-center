@@ -83,6 +83,8 @@ class Store:
         setup_discovery(self)
         from .source_index_queue import setup as setup_index_queue
         setup_index_queue(self)
+        from .configuration import setup as setup_configuration
+        setup_configuration(self)
 
     @contextmanager
     def db(self):

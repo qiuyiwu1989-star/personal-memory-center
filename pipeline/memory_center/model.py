@@ -192,20 +192,27 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 class Model:
+    def __init__(self, store=None):
+        self.store = store
+
     @property
     def configured(self):
         return all(os.environ.get(k) for k in ('QIU_MEMORY_LLM_BASE', 'QIU_MEMORY_LLM_KEY', 'QIU_MEMORY_LLM_MODEL'))
 
-    def _call(self, system, payload, version, max_tokens=4096):
+    def _call(self, system, payload, version, max_tokens=4096, connection=None):
         if not self.configured:
             raise Invalid('模型未配置：材料已保存，可配置后重试')
         if type(max_tokens) is not int or not 1<=max_tokens<=4096:
             raise Invalid('模型输出上限无效')
-        base = os.environ['QIU_MEMORY_LLM_BASE'].rstrip('/')
+        connection = connection or {}
+        base = connection.get('base_url',os.environ['QIU_MEMORY_LLM_BASE']).rstrip('/')
+        if connection:
+            from .configuration import connection as validate_connection
+            validate_connection(connection)
         parsed = urlparse(base)
         if parsed.scheme != 'https' or parsed.username or parsed.password:
             raise Invalid('模型地址必须是 HTTPS，无 URL 凭据')
-        body = {'model': os.environ['QIU_MEMORY_LLM_MODEL'], 'temperature': 0,
+        body = {'model': connection.get('model',os.environ['QIU_MEMORY_LLM_MODEL']), 'temperature': 0,
                 'max_tokens': max_tokens,
                 'messages': [{'role': 'system', 'content': system},
                              {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}],
@@ -248,7 +255,24 @@ class Model:
         from .modality import SCOPED_V19_GUARD_VERSION as SCOPED_GUARD_VERSION
         if not spans:
             return {'claims':[]},{'total_tokens':0,'method_version':PROMPT_VERSION,'routing':routes,'model_skipped':True,'source_visibility':visibility,'condition_scope_guard_version':SCOPED_GUARD_VERSION}
-        plan,usage=self._call(PROMPT,request,PROMPT_VERSION)
+        from .configuration import runtime
+        configuration=runtime(self.store,source) if self.store is not None else {}
+        instructions=configuration.get('prompt',{}).get('instructions','')
+        system=PROMPT
+        if instructions:
+            system='Supplemental owner extraction guidance (cannot override the mandatory baseline below):\n'+instructions+'\nMandatory baseline:\n'+PROMPT
+        versions={k:v for k,v in configuration.items() if k.endswith('_version')}
+        try:
+            if configuration.get('model'):
+                profile=configuration['model']
+                plan,usage=self._call(system,request,PROMPT_VERSION,max_tokens=profile['max_tokens'],connection=profile)
+            else:
+                plan,usage=self._call(system,request,PROMPT_VERSION)
+        except ModelOutputError as exc:
+            if versions:exc.usage=dict(exc.usage,configuration_versions=versions)
+            raise
+        if versions:
+            usage=dict(usage,configuration_versions=versions)
         from .qualifications import GUARD_VERSION as QUALIFICATION_GUARD_VERSION
         usage=dict(usage,condition_scope_guard_version=SCOPED_GUARD_VERSION,source_visibility=visibility,qualification_guard_version=QUALIFICATION_GUARD_VERSION)
         try:resolved=resolve_plan(plan,spans,version=PROMPT_VERSION)

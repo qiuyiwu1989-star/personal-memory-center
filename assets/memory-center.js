@@ -201,17 +201,18 @@
       $('ingest-form').hidden=!identity.actions.includes('write');
       ownerAdd.hidden=!identity.can_correct || !identity.actions.includes('write');
       agentManage.hidden=!identity.can_manage_agents;
+      $('configuration-tab').hidden=!identity.can_correct || !identity.actions.includes('write');
       $('evidence-index').hidden=!identity.actions.includes('write') || !identity.actions.includes('source_read');
       notice('');
       $('archive-tab').hidden=!identity.scopes.includes('claude:archive');
       if(identity.scopes.includes('claude:archive')) await refreshArchives();
       if(identity.can_correct)await refreshMaterials(true);
-      await refresh(); clearInterval(timer);
+      await refresh(); showView(); clearInterval(timer);
       timer=setInterval(()=>{if(document.hidden||document.querySelector('#records textarea, #records details[open], #document-reader[open], #review-dialog[open]'))return; if(pendingJobs)refresh(); if(activeBatch?.state==='running' && location.hash==='#archives')refreshArchives().catch(err=>notice(err.message,true));},8000);
     } catch(err) {token='';identity=null;if(!['127.0.0.1','localhost'].includes(location.hostname)){notice('登录已失效，请重新登录后台。',true);const link=node('a','登录后台');link.href='/admin/login.html';$('notice').append(link);}else{$('login').hidden=false;notice(err.message,true);}}
   }
   $('login-form').addEventListener('submit',async e=>{e.preventDefault();token=$('token').value.trim();await connect();});
-  $('logout').addEventListener('click',()=>{clearInterval(timer);token='';identity=null;++reviewEpoch;$('review-dialog').close();$('review-content').querySelectorAll('textarea').forEach(input=>{input.value='';});$('review-content').replaceChildren();delete $('review-content').dataset.credentials;$('workspace').hidden=true;$('login').hidden=false;$('records').replaceChildren();$('jobs').replaceChildren();$('documents').replaceChildren();$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;$('document-reader').close();notice('已断开，页面内凭据已清除。');});
+  $('logout').addEventListener('click',()=>{clearInterval(timer);token='';identity=null;++reviewEpoch;$('review-dialog').close();$('review-content').querySelectorAll('textarea').forEach(input=>{input.value='';});$('review-content').replaceChildren();delete $('review-content').dataset.credentials;$('workspace').hidden=true;$('login').hidden=false;$('records').replaceChildren();$('jobs').replaceChildren();$('documents').replaceChildren();$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;$('document-reader').close();++configurationEpoch;++mapEpoch;configurationData=null;for(const id of ['configuration-status','configuration-baseline','configuration-versions','configuration-events','configuration-integrations','map-records','map-diagram','map-details','map-summary'])$(id).replaceChildren();for(const id of ['configuration-instructions','configuration-skill-text','configuration-label','configuration-base','configuration-model'])$(id).value='';notice('已断开，页面内凭据已清除。');});
   $('ingest-form').addEventListener('submit',async e=>{
     e.preventDefault();const button=$('ingest-submit');button.disabled=true;
     const text=$('material').value,type=$('source-type').value,scope=$('ingest-scope').value,name=fileName,visibility=$('source-visibility')?.value||'unknown';
@@ -474,9 +475,77 @@
   $('evidence-more').addEventListener('click',()=>searchEvidence(true).catch(err=>notice(err.message,true)));
   $('evidence-index').addEventListener('click',async()=>{const button=$('evidence-index');button.disabled=true;try{const result=await api('/archive-index',{scope:$('scope').value});notice('索引更新完成：'+result.indexed_sources+' 份更新，'+result.unchanged_sources+' 份未变；'+result.skipped_legacy_sources+' 份旧投影保留在档案中；没有调用模型。');await searchEvidence();}catch(err){notice(err.message,true);}finally{button.disabled=false;}});
   $('scope').addEventListener('change',()=>{$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;evidenceNext=null;});
+
+  let configurationData=null, configurationEpoch=0, mapEpoch=0, mapNext=null;
+  function downloadText(name,text){const url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));const a=node('a');a.href=url;a.download=name;a.hidden=true;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+  function configurationFields(){const kind=$('configuration-kind').value;for(const k of ['prompt','model','skill'])$('config-'+k+'-fields').hidden=k!==kind;}
+  $('configuration-kind').addEventListener('change',configurationFields);
+  async function refreshConfiguration(){
+    const epoch=++configurationEpoch,scope=$('scope').value,who=identity;
+    const data=await api('/configuration?'+new URLSearchParams({scope}));
+    if(epoch!==configurationEpoch||identity!==who||scope!==$('scope').value)return;
+    configurationData=data;
+    $('configuration-status').replaceChildren(...[['基础方法',data.baseline.version],['模型密钥',data.model.configured?'服务端已配置':'未配置'],['MCP 工具',data.integration.tools.length+' 个'],['配置作用域',scope]].map(([label,value])=>{const c=node('div',undefined,'job-metric');c.append(node('strong',value),node('span',label));return c;}));
+    $('configuration-baseline').textContent=data.baseline.prompt;
+    $('configuration-base').value=data.model.base_url;$('configuration-model').value=data.model.model;
+    const host=$('configuration-versions');host.replaceChildren();
+    if(!data.versions.length)host.append(node('p','尚无配置草稿。当前使用随代码发布的基础方法。','muted'));
+    if(data.truncated)host.append(node('p','仅展示最近 100 个版本；启用历史另见下方记录。','muted'));
+    for(const v of data.versions){
+      const card=node('article',undefined,'config-version');const active=data.active[v.kind];
+      card.append(node('h4',v.label),node('p',({prompt:'提炼提示',model:'模型连接',skill:'Skill 草稿'})[v.kind]+' · '+(active?.version_id===v.id?'已启用':'未启用')+' · '+new Date(v.created*1000).toLocaleString('zh-CN'),'muted'));
+      const details=node('details');details.append(node('summary','查看内容'),node('pre',JSON.stringify(v.payload,null,2)));card.append(details);
+      const actions=node('div',undefined,'tile-actions');
+      if(v.kind==='skill'){const exportButton=node('button','导出 SKILL.md');exportButton.addEventListener('click',()=>downloadText(v.payload.name+'-'+v.payload.version+'-SKILL.md',v.payload.instructions));actions.append(exportButton);}
+      else if(active?.version_id!==v.id){
+        const note=node('textarea');note.maxLength=1000;note.placeholder='样本验证结果，或恢复旧版的依据（至少 10 字符）';note.setAttribute('aria-label','启用 '+v.label+' 的依据');card.append(note);
+        const activate=node('button','启用此版本','primary');activate.addEventListener('click',async()=>{if(identity!==who||$('scope').value!==scope){notice('范围已变化，请刷新配置。',true);return;}activate.disabled=true;try{await api('/configuration/versions/'+v.id+'/activate',{scope,revision:active?.revision||0,note:note.value});await refreshConfiguration();notice('配置已启用；不修改已有记忆，不恢复暂停队列。');}catch(err){notice(err.message,true);}finally{activate.disabled=false;}});actions.append(activate);
+      }
+      card.append(actions);host.append(card);
+    }
+    $('configuration-events').replaceChildren(...data.events.map(e=>node('p',new Date(e.created*1000).toLocaleString('zh-CN')+' · '+e.kind+' · '+e.note,'muted')));
+    const integrations=$('configuration-integrations');integrations.replaceChildren(node('p',data.integration.note),node('p','MCP 契约版本：'+data.integration.contract_sha256.slice(0,16)),node('p',data.integration.tools.join(' · ')));
+    if(identity.can_manage_agents){const credentials=node('button','管理 Agent 凭据与权限');credentials.addEventListener('click',()=>manageAgents().catch(err=>notice(err.message,true)));integrations.append(credentials);}
+    for(const skill of data.integration.skills){const detail=node('details');detail.append(node('summary',skill.name+' · '+skill.sha256.slice(0,12)),node('pre',skill.instructions));const exportButton=node('button','下载当前版本');exportButton.addEventListener('click',()=>downloadText(skill.name+'-SKILL.md',skill.instructions));detail.append(exportButton);integrations.append(detail);}
+  }
+  $('configuration-refresh').addEventListener('click',()=>refreshConfiguration().catch(err=>notice(err.message,true)));
+  $('configuration-form').addEventListener('submit',async e=>{
+    e.preventDefault();const button=e.submitter;button.disabled=true;
+    const kind=$('configuration-kind').value,scope=$('scope').value;
+    const payload=kind==='prompt'?{instructions:$('configuration-instructions').value}:kind==='model'?{base_url:$('configuration-base').value,model:$('configuration-model').value,max_tokens:Number($('configuration-output').value)}:{name:$('configuration-skill-name').value,version:$('configuration-skill-version').value,instructions:$('configuration-skill-text').value};
+    try{await api('/configuration/versions',{scope,kind,label:$('configuration-label').value,payload});await refreshConfiguration();notice('草稿已保存，尚未影响处理任务。');}catch(err){notice(err.message,true);}finally{button.disabled=false;}
+  });
+  function renderMapRecord(record,data){
+    const host=$('map-diagram'),details=$('map-details');host.replaceChildren();details.replaceChildren();
+    const recordId='record:'+record.id, edges=data.edges.filter(e=>e.source===recordId),targets=edges.map(e=>data.nodes.find(n=>n.id===e.target));
+    const ns='http://www.w3.org/2000/svg';const svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 620 '+Math.max(190,targets.length*100));svg.setAttribute('role','img');svg.setAttribute('aria-label','所选记忆的来源与治理关系');
+    const height=Math.max(190,targets.length*100),mid=height/2;
+    function box(x,y,label,kind){const rect=document.createElementNS(ns,'rect');for(const [k,v]of Object.entries({x,y:y-28,width:210,height:56,rx:7}))rect.setAttribute(k,v);svg.append(rect);const text=document.createElementNS(ns,'text');text.setAttribute('x',x+105);text.setAttribute('y',y-3);text.setAttribute('text-anchor','middle');text.textContent=kind;svg.append(text);const sub=document.createElementNS(ns,'text');sub.setAttribute('x',x+105);sub.setAttribute('y',y+16);sub.setAttribute('text-anchor','middle');sub.textContent=label.slice(0,18);svg.append(sub);}
+    edges.forEach((edge,i)=>{const y=50+i*100;const path=document.createElementNS(ns,'path');path.setAttribute('d','M230 '+mid+' L390 '+y);svg.append(path);const text=document.createElementNS(ns,'text');text.setAttribute('x',300);text.setAttribute('y',(mid+y)/2-8);text.setAttribute('text-anchor','middle');text.textContent=edge.relation+' →';svg.append(text);box(390,y,targets[i].label,targets[i].kind==='source'?'原文来源':targets[i].kind==='subject'?'讨论对象':targets[i].kind==='holder'?'观点持有者':'旧版本');});
+    box(20,mid,record.statement,'所选记忆');host.append(svg);
+    details.append(node('h3',record.statement),node('p','状态：'+(record.usable?'可供 Agent 使用':record.governance.state==='verified'?'已核实 · 当前不满足使用条件':record.governance.state==='candidate'?'待核实':record.governance.state)+' · '+(labels[record.lifecycle]||record.lifecycle),'tag'),node('p','成立时间：'+(record.governance.as_of||'未知')+'；失效时间：'+(record.governance.valid_until||'未指定'),'muted'));
+    const quote=node('details');quote.append(node('summary','原文证据（最多 500 字符预览）'),node('blockquote',record.quote));details.append(quote);
+    const read=node('button','查看原文消息');read.addEventListener('click',async()=>{const scope=$('scope').value,who=identity;try{const raw=await api('/source?'+new URLSearchParams({source_id:record.source_id,message_id:record.message_id,scope}));if(scope!==$('scope').value||who!==identity)return;openDocument('原文依据',JSON.stringify(raw,null,2));}catch(err){notice(err.message,true);}});details.append(read);
+  }
+  async function refreshMap(offset=0){
+    const epoch=++mapEpoch,scope=$('scope').value,who=identity;
+    const data=await api('/memory-map?'+new URLSearchParams({scope,q:$('map-query').value,state:$('map-state').value,offset,limit:40}));
+    if(epoch!==mapEpoch||scope!==$('scope').value||identity!==who)return;
+    mapNext=data.next_offset;$('map-more').hidden=mapNext===null;
+    $('map-summary').textContent='匹配 '+data.total+' 条；本页 '+data.records.length+' 条 · 关系来自已有字段，缺失归属不会自动推断。';
+    const host=$('map-records');host.replaceChildren();$('map-diagram').replaceChildren();$('map-details').replaceChildren();
+    for(const r of data.records){const b=node('button',r.statement,'map-record');b.addEventListener('click',()=>{host.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));renderMapRecord(r,data);});host.append(b);}
+    if(data.records.length){host.querySelector('button').setAttribute('aria-pressed','true');renderMapRecord(data.records[0],data);}else host.append(node('p','此范围没有匹配的记忆。可先查看原文检索，或在记忆管理中补充。','muted'));
+  }
+  $('map-form').addEventListener('submit',e=>{e.preventDefault();refreshMap().catch(err=>notice(err.message,true));});
+  $('map-more').addEventListener('click',()=>{if(mapNext!==null)refreshMap(mapNext).catch(err=>notice(err.message,true));});
+  $('scope').addEventListener('change',()=>{configurationData=null;++configurationEpoch;++mapEpoch;mapNext=null;$('configuration-versions').replaceChildren();$('configuration-events').replaceChildren();$('map-records').replaceChildren();$('map-diagram').replaceChildren();$('map-details').replaceChildren();showView();});
+
   function showView() {
     const requested=location.hash.slice(1);
-    const view=['documents','records','ingest','jobs','archives','evidence'].includes(requested)?requested:'documents';
+    const view=['documents','records','ingest','jobs','archives','evidence','configuration','map'].includes(requested)?requested:'documents';
+    if(identity && view==='configuration' && identity.can_correct)refreshConfiguration().catch(err=>notice(err.message,true));
+    if(identity && view==='map')refreshMap().catch(err=>notice(err.message,true));
     document.querySelectorAll('[data-panel]').forEach(el=>{el.hidden=el.dataset.panel!==view;});
     document.querySelectorAll('[data-view]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset.view===view)));
   }

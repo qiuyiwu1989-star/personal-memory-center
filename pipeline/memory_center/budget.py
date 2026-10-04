@@ -64,7 +64,8 @@ def status(store,principal,scope):
 
 def reserve(db,source,operation,reference_id):
     # UTF-8 byte count is a conservative input-token allowance, plus prompt/output.
-    allowance=len(source['payload'].encode('utf-8'))+12000
+    from .configuration import extra_reservation
+    allowance=len(source['payload'].encode('utf-8'))+12000+extra_reservation(db,source['owner'],source['scope'])
     return _reserve(db,source,operation,reference_id,allowance)
 
 
