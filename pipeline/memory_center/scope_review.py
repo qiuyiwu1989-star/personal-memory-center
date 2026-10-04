@@ -122,6 +122,12 @@ def prepare_long_source_review(envelope, plan, *, version):
             raise Invalid('长来源信封与归档计划不匹配')
     original_coverage = audit_input_coverage(plan['source_type'], messages, version=version)
     original_rows = {row['message_id']: row for row in original_coverage['items']}
+    inherited = None
+    inherited_rows = {}
+    if version == '2026-10-04.22':
+        from .source_context import inherit_source_context
+        inherited = inherit_source_context(envelope, plan, version=version)
+        inherited_rows = {row['segment_id']: row for row in inherited['segments']}
     segments = []
     for segment in plan['segments']:
         payload = segment['payload']
@@ -139,13 +145,18 @@ def prepare_long_source_review(envelope, plan, *, version):
                          'review_reasons': review_reasons,
                          'complete_source_route': original_row['route'],
                          'automatic_extraction_authorized': False,
-                         'review_packet': review, 'input_coverage': coverage})
+                         'independent_segment_routing_purpose': 'diagnostic_only_not_authorized_extraction',
+                         'review_packet': review, 'input_coverage': coverage,
+                         'inherited_context': copy.deepcopy(inherited_rows.get(segment['segment_id']))})
     return {'packet_version': 'long-source-review-v1', 'method_version': version,
             'original_envelope': copy.deepcopy(envelope), 'archive_verification': verification,
             'complete_source_input_coverage': original_coverage,
             'source_canonical_sha256': plan['source_canonical_sha256'], 'segments': segments,
             'archive_characters': plan['source_characters'],
-            'extraction_evidence_characters': sum(s['input_coverage']['evidence_characters'] for s in segments),
+            'extraction_evidence_characters': (inherited['inherited_evidence_characters'] if inherited else
+                sum(s['input_coverage']['evidence_characters'] for s in segments)),
+            'independent_segment_evidence_characters': sum(s['input_coverage']['evidence_characters'] for s in segments),
+            'source_context_inheritance': inherited,
             'unreviewed_segments': len(segments), 'quality_approved': False,
             'facts_confirmed': False, 'automatic_scope_release': False, 'model_calls': 0,
             'contains_private_source_text': True}

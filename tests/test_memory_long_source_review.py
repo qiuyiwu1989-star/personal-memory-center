@@ -35,7 +35,8 @@ class LongSourceReviewTests(unittest.TestCase):
         env=self.envelope()
         env['messages']=[{'id':'template','role':'user','text':'请参考。\n你是助手。核心使命：'+ '合成模板正文。'*5000}]
         packet=prepare_long_source_review(env,plan_long_source(**env),version='2026-10-04.22')
-        self.assertLess(packet['complete_source_input_coverage']['evidence_characters'],packet['extraction_evidence_characters'])
+        self.assertLess(packet['complete_source_input_coverage']['evidence_characters'],packet['independent_segment_evidence_characters'])
+        self.assertLessEqual(packet['extraction_evidence_characters'],packet['complete_source_input_coverage']['evidence_characters'])
         self.assertTrue(any('segment_routing_differs_from_complete_source' in s['review_reasons']for s in packet['segments']))
         self.assertTrue(all(not s['automatic_extraction_authorized']for s in packet['segments']))
 
