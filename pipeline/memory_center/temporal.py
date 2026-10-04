@@ -43,6 +43,10 @@ def available(store,db):
 def record(store,db,principal,scope,rid,previous,record_revision,governance,request_key,change,now=None,previous_governance=None):
     if principal.get('trusted_user') is not True:raise PermissionError('仅本人可追加纠正时间审计')
     permit(principal,scope,'write')
+    # Withdrawal is an explicit human action, never a state inferred by the UI.
+    # Reject inconsistent API requests inside the same mutation transaction.
+    if change['change_kind']=='withdrawal' and governance.get('state')!='rejected':
+        raise Invalid('撤回记录需将治理状态明确设为不采纳')
     if not available(store,db):
         if change['change_kind']!='legacy_unspecified' or change['previous_valid_until'] is not None:
             raise Invalid('纠正时间审计需要先应用独立的 007 迁移')

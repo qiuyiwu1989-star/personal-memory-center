@@ -1,0 +1,29 @@
+{
+  "synthetic": true,
+  "input": {
+    "source_key": "synthetic:localvault:readiness:v1",
+    "scope": "agent:synthetic-inbox",
+    "source_type": "document",
+    "source_metadata": {
+      "original_ref": "synthetic://localvault/readiness/v1",
+      "parser_version": "synthetic-readiness-v1"
+    },
+    "messages": [
+      {
+        "id": "speaker-a",
+        "role": "external",
+        "text": "合成第三方发言：如果项目甲获批，才考虑扩大试点。🙂"
+      },
+      {
+        "id": "assistant-a",
+        "role": "assistant",
+        "text": "合成助手建议：项目乙可另行评估；这不是本人决定。"
+      },
+      {
+        "id": "user-a",
+        "role": "user",
+        "text": "合成本人更正：这里只批准评估，没有批准项目甲或乙上线。"
+      }
+    ]
+  }
+}

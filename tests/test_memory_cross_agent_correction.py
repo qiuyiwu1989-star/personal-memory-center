@@ -7,6 +7,7 @@ from unittest.mock import patch
 from starlette.testclient import TestClient
 import test_memory_center as fixture
 from pipeline.memory_center.service import create_app
+from pipeline.memory_center import temporal
 
 
 class CrossAgentCorrectionTest(unittest.TestCase):
@@ -133,6 +134,87 @@ class CrossAgentCorrectionTest(unittest.TestCase):
             allowed = self.read(c, 'beta').json()['result']
             data = allowed.get('structuredContent') or json.loads(allowed['content'][0]['text'])
             self.assertEqual(data, prior)
+        self.assertEqual(self.model.calls, 0)
+
+    def test_007_explicit_withdrawal_updates_two_readers_and_audits_no_inferred_period(self):
+        temporal.setup(self.store)
+        grants, client = self.protocol()
+        with client as c:
+            initial = self.create(c)
+            before = self.contexts(c)
+            self.review(c, initial, revision=1, state='rejected', change_kind='withdrawal')
+            after = self.contexts(c)
+            self.assertEqual(after['records'], [])
+            self.assertNotEqual(before['context_revision'], after['context_revision'])
+            with self.store.db() as db:
+                event = db.execute("SELECT * FROM memory_change_events WHERE change_kind='withdrawal'").fetchone()
+                self.assertEqual(event['record_id'], initial['id'])
+                self.assertEqual(event['previous_record_id'], initial['id'])
+                self.assertEqual(event['governance_revision'], 2)
+                self.assertEqual(event['actor'], self.owner['id'])
+                for field in ('valid_from', 'valid_until', 'previous_valid_until'):
+                    self.assertIsNone(event[field])
+                self.assertEqual(db.execute('SELECT count(*) n FROM sources').fetchone()['n'], 1)
+            self.assertTrue(temporal.status(self.store, self.owner, 'personal')['stale'])
+        self.assertEqual(self.model.calls, 0)
+
+    def test_007_inconsistent_withdrawal_and_stale_edit_rollback_without_audit(self):
+        temporal.setup(self.store)
+        grants, client = self.protocol()
+        with client as c:
+            initial = self.create(c)
+            before = self.contexts(c)
+            headers = {'Authorization': 'Bearer synthetic-owner-protocol'}
+            review_path = self.prefix+'/records/'+initial['id']+'/governance'
+            bad = c.post(review_path, headers=headers, json={
+                'revision': 1, 'change_kind': 'withdrawal', **self.verified()})
+            self.assertEqual(bad.status_code, 400)
+            self.assertEqual(self.contexts(c), before)
+            # A second browser edited governance while the first held revision 1.
+            self.review(c, initial, revision=1, **self.verified())
+            current = self.contexts(c)
+            stale = c.post(self.prefix+'/records/'+initial['id']+'/revise', headers=headers, json={
+                'scope': 'personal', 'request_key': 'synthetic-stale', 'revision': 1,
+                'governance_revision': 1, 'statement': 'Synthetic stale edit.',
+                'change_kind': 'interpretation_correction'})
+            self.assertEqual(stale.status_code, 409)
+            self.assertEqual(self.contexts(c), current)
+            bad_revision = c.post(self.prefix+'/records/'+initial['id']+'/revise', headers=headers, json={
+                'scope': 'personal', 'request_key': 'synthetic-bad-withdrawal', 'revision': 1,
+                'governance_revision': 2, 'change_kind': 'withdrawal',
+                'explicit_confirmation': True, 'governance': self.verified()})
+            self.assertEqual(bad_revision.status_code, 400)
+            self.assertEqual(self.contexts(c), current)
+            with self.store.db() as db:
+                self.assertEqual(db.execute('SELECT count(*) n FROM records').fetchone()['n'], 1)
+                self.assertEqual(db.execute('SELECT count(*) n FROM sources').fetchone()['n'], 1)
+                self.assertEqual(db.execute('SELECT count(*) n FROM memory_change_events').fetchone()['n'], 2)
+                self.assertEqual(db.execute("SELECT count(*) n FROM memory_change_events WHERE change_kind='withdrawal'").fetchone()['n'], 0)
+            self.assertEqual(temporal.status(self.store, self.owner, 'personal')['generation'], 2)
+        self.assertEqual(self.model.calls, 0)
+
+    def test_007_interpretation_correction_requires_review_and_preserves_audit_lineage(self):
+        temporal.setup(self.store)
+        grants, client = self.protocol()
+        with client as c:
+            initial = self.create(c)
+            original = self.contexts(c)
+            revised = self.post(c, '/records/'+initial['id']+'/revise', {
+                'scope': 'personal', 'request_key': 'synthetic-explicit-correction',
+                'revision': 1, 'governance_revision': 1,
+                'statement': 'Synthetic corrected interpretation.',
+                'change_kind': 'interpretation_correction'})
+            self.assertEqual(self.contexts(c)['records'], [])
+            self.review(c, revised, **self.verified())
+            current = self.contexts(c)
+            self.assertEqual([r['id'] for r in current['records']], [revised['id']])
+            self.assertNotEqual(original['context_revision'], current['context_revision'])
+            with self.store.db() as db:
+                event = db.execute("SELECT * FROM memory_change_events WHERE change_kind='interpretation_correction'").fetchone()
+                self.assertEqual(event['previous_record_id'], initial['id'])
+                self.assertEqual(event['record_id'], revised['id'])
+                self.assertIsNone(event['previous_valid_until'])
+                self.assertEqual(db.execute('SELECT lifecycle FROM records WHERE id=?', (initial['id'],)).fetchone()['lifecycle'], 'superseded')
         self.assertEqual(self.model.calls, 0)
 
 
