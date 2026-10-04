@@ -135,7 +135,7 @@ def process_one(store,model):
         run=db.execute("SELECT * FROM extraction_runs WHERE state='received' ORDER BY created LIMIT 1").fetchone()
         if not run:return False
         run=dict(run)
-        if run['method_version']!=PROMPT_VERSION:
+        if run['method_version']!=getattr(model,'method_version',PROMPT_VERSION):
             db.execute("UPDATE extraction_runs SET state='failed',error='method_version_changed' WHERE id=?",(run['id'],));return True
         source=dict(db.execute('SELECT * FROM sources WHERE id=?',(run['source_id'],)).fetchone())
         from .source_metadata import load as load_metadata
@@ -157,7 +157,7 @@ def process_one(store,model):
     usage=None
     try:
         if operation['operation']=='translate':
-            translated,usage=model.translate(target['statement'])
+            translated,usage=model.translate_source(source,target['statement']) if hasattr(model,'translate_source') else model.translate(target['statement'])
             if not isinstance(translated,str) or not 1<=len(translated)<=2000:raise Invalid('翻译输出无效')
             comparison={'id':uid(),'source_id':source['id'],'method_version':'zh-projection-v1','operation':'translate','semantic_verified':False,
                         'changes':[{'comparison':'translation','candidate':{'record_id':target['id'],'original':target['statement'],'text':translated}}]}

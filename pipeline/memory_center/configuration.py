@@ -4,6 +4,7 @@ Secrets stay in the existing service environment. Model URLs cannot redirect the
 existing key to a new destination. Activating a prompt never approves memories.
 """
 import ast
+import difflib
 import hashlib
 import json
 import os
@@ -86,24 +87,79 @@ def integration_manifest():
     for name in ('personal-memory-center', 'memory-capture'):
         path = root/'skills'/name/'SKILL.md'
         text = path.read_text()
-        skills.append(dict(name=name, sha256=hashlib.sha256(text.encode()).hexdigest(), instructions=text))
-    return dict(tools=tools, skills=skills, contract_sha256=hashlib.sha256((root/'pipeline/memory_center/service.py').read_bytes()).hexdigest(), publication='bundled_code',
+        skills.append(dict(name=name, sha256=hashlib.sha256(text.encode()).hexdigest(), instructions=text, publication="bundled_code", installed="unknown"))
+    return dict(tools=tools, skills=skills, contract_sha256=hashlib.sha256((root/'pipeline/memory_center/service.py').read_bytes()).hexdigest(), publication='bundled_code', installed='unknown',
                 note='MCP 工具随代码发布；Skill 草稿需导出并在客户端安装，不会远程自动执行。')
 
 
-def listing(store, principal, scope):
+def page_number(value, label, maximum=None):
+    try:
+        if isinstance(value, bool) or str(value).strip() != str(int(value)): raise ValueError()
+        number = int(value)
+    except (ValueError, TypeError): raise Invalid(label + '无效')
+    if number < 0 or (maximum is not None and number > maximum): raise Invalid(label + '超出范围')
+    return number
+
+
+def version_row(db, principal, scope, version_id):
+    row = db.execute('SELECT * FROM system_config_versions WHERE id=? AND owner=? AND scope=?',
+                     (version_id, principal['owner'], scope)).fetchone()
+    if not row: raise Invalid('版本不存在')
+    result = dict(row); result['payload'] = json.loads(result['payload'])
+    return result
+
+
+def listing(store, principal, scope, offset=0, limit=20, event_offset=0):
     authorize(principal, scope)
+    offset = page_number(offset, '版本分页位置', 2147483647)
+    limit = page_number(limit, '分页数量', 100)
+    event_offset = page_number(event_offset, '审计分页位置', 2147483647)
+    if not limit: raise Invalid('分页数量需为 1–100')
     from .model import PROMPT, PROMPT_VERSION, Model
+    params = (principal['owner'], scope)
     with store.db() as db:
-        versions = [dict(r) for r in db.execute('SELECT * FROM system_config_versions WHERE owner=? AND scope=? ORDER BY created DESC LIMIT 101', (principal['owner'], scope))]
-        active = {r['kind']: dict(r) for r in db.execute('SELECT * FROM system_config_active WHERE owner=? AND scope=?', (principal['owner'], scope))}
-        events = [dict(r) for r in db.execute('SELECT * FROM system_config_events WHERE owner=? AND scope=? ORDER BY created DESC LIMIT 30', (principal['owner'], scope))]
+        total = db.execute('SELECT count(*) n FROM system_config_versions WHERE owner=? AND scope=?', params).fetchone()['n']
+        versions = [dict(r) for r in db.execute('SELECT * FROM system_config_versions WHERE owner=? AND scope=? ORDER BY created DESC,id DESC LIMIT ? OFFSET ?', params+(limit,offset))]
+        active = {r['kind']: dict(r) for r in db.execute('SELECT * FROM system_config_active WHERE owner=? AND scope=?', params)}
+        for item in active.values(): item['version'] = version_row(db, principal, scope, item['version_id'])
+        event_total = db.execute('SELECT count(*) n FROM system_config_events WHERE owner=? AND scope=?', params).fetchone()['n']
+        events = [dict(r) for r in db.execute('SELECT * FROM system_config_events WHERE owner=? AND scope=? ORDER BY created DESC,id DESC LIMIT 30 OFFSET ?', params+(event_offset,))]
     for v in versions: v['payload'] = json.loads(v['payload'])
-    return dict(versions=versions[:100], truncated=len(versions)>100, active=active, events=events,
+    return dict(versions=versions, truncated=offset+len(versions)<total, total=total, offset=offset,
+                next_offset=offset+len(versions) if offset+len(versions)<total else None,
+                active=active, events=events, event_total=event_total, event_offset=event_offset,
+                event_next_offset=event_offset+len(events) if event_offset+len(events)<event_total else None,
                 baseline=dict(version=PROMPT_VERSION, prompt=PROMPT),
                 model=dict(configured=Model().configured, base_url=os.environ.get('QIU_MEMORY_LLM_BASE',''),
                            model=os.environ.get('QIU_MEMORY_LLM_MODEL',''), secret_managed='server_private_config'),
                 integration=integration_manifest())
+
+
+def compare(store, principal, scope, left_id, right_id):
+    authorize(principal, scope)
+    with store.db() as db:
+        left = version_row(db, principal, scope, left_id)
+        right = version_row(db, principal, scope, right_id)
+    if left['kind'] != right['kind'] or (left['kind'] == 'skill' and left['payload']['name'] != right['payload']['name']):
+        raise Invalid('仅可比较同类配置或同名 Skill')
+    before = json.dumps(left['payload'], ensure_ascii=False, sort_keys=True, indent=2)
+    after = json.dumps(right['payload'], ensure_ascii=False, sort_keys=True, indent=2)
+    diff = ''.join(difflib.unified_diff(before.splitlines(keepends=True), after.splitlines(keepends=True), fromfile=left['id'], tofile=right['id']))
+    return dict(left=left, right=right, changed=left['payload'] != right['payload'], diff=diff, semantic_quality_verified=False)
+
+
+def skill_export(store, principal, scope, version_id=None, name=None):
+    authorize(principal, scope)
+    if version_id:
+        with store.db() as db: version = version_row(db, principal, scope, version_id)
+        if version['kind'] != 'skill': raise Invalid('此版本不是 Skill')
+        payload = version['payload']; text = payload['instructions']
+        filename = payload['name'] + '-' + version['id'] + '-SKILL.md'; state = 'draft'
+    else:
+        if name not in ('personal-memory-center','memory-capture'): raise Invalid('Skill 不存在')
+        skill = next(s for s in integration_manifest()['skills'] if s['name'] == name)
+        text = skill['instructions']; filename = name + '-SKILL.md'; state = 'bundled_code'
+    return dict(text=text, filename=filename, publication=state, installed='unknown', sha256=hashlib.sha256(text.encode()).hexdigest())
 
 
 def draft(store, principal, scope, body):

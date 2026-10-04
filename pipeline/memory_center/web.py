@@ -81,7 +81,22 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
     @bp.get('/configuration')
     def configuration_list():
         from .configuration import listing
-        return jsonify(listing(store,g.memory_principal,request.args.get('scope','personal')))
+        return jsonify(listing(store,g.memory_principal,request.args.get('scope','personal'),request.args.get('offset',0),request.args.get('limit',20),request.args.get('event_offset',0)))
+
+    @bp.get('/configuration/compare')
+    def configuration_compare():
+        from .configuration import compare
+        return jsonify(compare(store,g.memory_principal,request.args.get('scope','personal'),request.args.get('left'),request.args.get('right')))
+
+    @bp.get('/configuration/skill-download')
+    def configuration_skill_download():
+        from .configuration import skill_export
+        data = skill_export(store,g.memory_principal,request.args.get('scope','personal'),request.args.get('version_id'),request.args.get('name'))
+        response = Response(data['text'].encode('utf-8'), content_type='text/markdown; charset=utf-8')
+        response.headers['Content-Disposition'] = 'attachment; filename="' + data['filename'] + '"'
+        response.headers['X-Skill-SHA256'] = data['sha256']
+        response.headers['X-Skill-Publication'] = data['publication']
+        return response
 
     @bp.post('/configuration/versions')
     def configuration_draft():

@@ -122,7 +122,7 @@
       const changes=node('button','版本变化');changes.addEventListener('click',()=>openDocument(doc.title+' · v'+doc.revision,doc.changes||'无变化'));
       const download=node('button','下载 MD');download.addEventListener('click',()=>{
         const url=URL.createObjectURL(new Blob([doc.markdown],{type:'text/markdown;charset=utf-8'}));
-        const link=node('a');link.href=url;link.download=doc.slug+'.md';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+        const link=node('a');link.href=url;link.download=doc.slug+'.md';link.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
       });
       const actions=node('div',undefined,'tile-actions');actions.append(read,changes,download);block.append(actions);$('documents').append(block);
     }
@@ -212,7 +212,7 @@
     } catch(err) {token='';identity=null;if(!['127.0.0.1','localhost'].includes(location.hostname)){notice('登录已失效，请重新登录后台。',true);const link=node('a','登录后台');link.href='/admin/login.html';$('notice').append(link);}else{$('login').hidden=false;notice(err.message,true);}}
   }
   $('login-form').addEventListener('submit',async e=>{e.preventDefault();token=$('token').value.trim();await connect();});
-  $('logout').addEventListener('click',()=>{clearInterval(timer);token='';identity=null;++reviewEpoch;$('review-dialog').close();$('review-content').querySelectorAll('textarea').forEach(input=>{input.value='';});$('review-content').replaceChildren();delete $('review-content').dataset.credentials;$('workspace').hidden=true;$('login').hidden=false;$('records').replaceChildren();$('jobs').replaceChildren();$('documents').replaceChildren();$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;$('document-reader').close();++configurationEpoch;++mapEpoch;configurationData=null;for(const id of ['configuration-status','configuration-baseline','configuration-versions','configuration-events','configuration-integrations','map-records','map-diagram','map-details','map-summary'])$(id).replaceChildren();for(const id of ['configuration-instructions','configuration-skill-text','configuration-label','configuration-base','configuration-model'])$(id).value='';notice('已断开，页面内凭据已清除。');});
+  $('logout').addEventListener('click',()=>{clearInterval(timer);token='';identity=null;++reviewEpoch;$('review-dialog').close();$('review-content').querySelectorAll('textarea').forEach(input=>{input.value='';});$('review-content').replaceChildren();delete $('review-content').dataset.credentials;$('workspace').hidden=true;$('login').hidden=false;$('records').replaceChildren();$('jobs').replaceChildren();$('documents').replaceChildren();$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;$('document-reader').close();++configurationEpoch;++mapEpoch;configurationData=null;for(const id of ['configuration-active','configuration-compare','configuration-status','configuration-baseline','configuration-versions','configuration-events','configuration-integrations','map-records','map-diagram','map-details','map-summary'])$(id).replaceChildren();for(const id of ['configuration-instructions','configuration-skill-text','configuration-label','configuration-base','configuration-model'])$(id).value='';notice('已断开，页面内凭据已清除。');});
   $('ingest-form').addEventListener('submit',async e=>{
     e.preventDefault();const button=$('ingest-submit');button.disabled=true;
     const text=$('material').value,type=$('source-type').value,scope=$('ingest-scope').value,name=fileName,visibility=$('source-visibility')?.value||'unknown';
@@ -476,37 +476,72 @@
   $('evidence-index').addEventListener('click',async()=>{const button=$('evidence-index');button.disabled=true;try{const result=await api('/archive-index',{scope:$('scope').value});notice('索引更新完成：'+result.indexed_sources+' 份更新，'+result.unchanged_sources+' 份未变；'+result.skipped_legacy_sources+' 份旧投影保留在档案中；没有调用模型。');await searchEvidence();}catch(err){notice(err.message,true);}finally{button.disabled=false;}});
   $('scope').addEventListener('change',()=>{$('evidence-list').replaceChildren();$('evidence-summary').textContent='';$('evidence-more').hidden=true;evidenceNext=null;});
 
-  let configurationData=null, configurationEpoch=0, mapEpoch=0, mapNext=null;
-  function downloadText(name,text){const url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));const a=node('a');a.href=url;a.download=name;a.hidden=true;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+  let configurationData=null, configurationEpoch=0, configurationOffset=0, configurationEventOffset=0, mapEpoch=0, mapNext=null;
+  function downloadText(name,text){const url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));const a=node('a');a.href=url;a.download=name;a.hidden=true;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
   function configurationFields(){const kind=$('configuration-kind').value;for(const k of ['prompt','model','skill'])$('config-'+k+'-fields').hidden=k!==kind;}
   $('configuration-kind').addEventListener('change',configurationFields);
-  async function refreshConfiguration(){
+  async function downloadSkill(params,filename){
+    const who=identity,scope=$('scope').value;
+    const response=await fetch(prefix+'/configuration/skill-download?'+new URLSearchParams({...params,scope}),{headers:token?{Authorization:'Bearer '+token}:{'X-Memory-Local':'1'},cache:'no-store'});
+    if(!response.ok){const data=await response.json();throw new Error(data.error||'下载失败');}
+    const text=await response.text();
+    if(identity!==who||$('scope').value!==scope)throw new Error('范围已变化，请重新下载。');
+    if(!token && !['localhost','127.0.0.1','::1'].includes(location.hostname)){
+      const link=node('a');link.href=prefix+'/configuration/skill-download?'+new URLSearchParams({...params,scope});link.download=filename;document.body.append(link);link.click();link.remove();
+    }else downloadText(filename,text);
+    notice('Skill 文件已交给浏览器下载；客户端安装状态未知。');
+  }
+  async function refreshConfiguration(reset=true){
+    if(reset){configurationOffset=0;configurationEventOffset=0;}
     const epoch=++configurationEpoch,scope=$('scope').value,who=identity;
-    const data=await api('/configuration?'+new URLSearchParams({scope}));
+    const data=await api('/configuration?'+new URLSearchParams({scope,offset:configurationOffset,event_offset:configurationEventOffset,limit:20}));
     if(epoch!==configurationEpoch||identity!==who||scope!==$('scope').value)return;
     configurationData=data;
+    const kindLabel={prompt:'提炼提示',model:'模型连接',skill:'Skill 草稿'};
     $('configuration-status').replaceChildren(...[['基础方法',data.baseline.version],['模型密钥',data.model.configured?'服务端已配置':'未配置'],['MCP 工具',data.integration.tools.length+' 个'],['配置作用域',scope]].map(([label,value])=>{const c=node('div',undefined,'job-metric');c.append(node('strong',value),node('span',label));return c;}));
     $('configuration-baseline').textContent=data.baseline.prompt;
-    $('configuration-base').value=data.model.base_url;$('configuration-model').value=data.model.model;
+    const current=$('configuration-active');current.replaceChildren();
+    for(const kind of ['prompt','model']){
+      const item=data.active[kind],card=node('article',undefined,'config-version');
+      card.append(node('h4',kindLabel[kind]+' · '+(item?'已启用版本':'使用服务端基础配置')));
+      card.append(node('p',item?item.version.label+' · revision '+item.revision+' · '+item.version_id:kind==='prompt'?data.baseline.version:data.model.model||'模型未指定','muted'));
+      if(item){const detail=node('details');detail.append(node('summary','查看当前有效配置'),node('pre',JSON.stringify(item.version.payload,null,2)));card.append(detail);}current.append(card);
+    }
+    const modelPayload=data.active.model?.version.payload||data.model;
+    $('configuration-base').value=modelPayload.base_url;$('configuration-model').value=modelPayload.model;
+    $('configuration-output').value=modelPayload.max_tokens||4096;
     const host=$('configuration-versions');host.replaceChildren();
-    if(!data.versions.length)host.append(node('p','尚无配置草稿。当前使用随代码发布的基础方法。','muted'));
-    if(data.truncated)host.append(node('p','仅展示最近 100 个版本；启用历史另见下方记录。','muted'));
+    host.append(node('p','共 '+data.total+' 个版本 · 当前 '+(data.total?data.offset+1:0)+'–'+(data.offset+data.versions.length),'muted'));
+    if(!data.versions.length)host.append(node('p','本页无配置草稿。','muted'));
     for(const v of data.versions){
       const card=node('article',undefined,'config-version');const active=data.active[v.kind];
-      card.append(node('h4',v.label),node('p',({prompt:'提炼提示',model:'模型连接',skill:'Skill 草稿'})[v.kind]+' · '+(active?.version_id===v.id?'已启用':'未启用')+' · '+new Date(v.created*1000).toLocaleString('zh-CN'),'muted'));
+      card.append(node('h4',v.label),node('p',kindLabel[v.kind]+' · '+(v.kind==='skill'?'草稿 · 客户端安装未知':active?.version_id===v.id?'已启用':'未启用')+' · '+new Date(v.created*1000).toLocaleString('zh-CN'),'muted'));
       const details=node('details');details.append(node('summary','查看内容'),node('pre',JSON.stringify(v.payload,null,2)));card.append(details);
       const actions=node('div',undefined,'tile-actions');
-      if(v.kind==='skill'){const exportButton=node('button','导出 SKILL.md');exportButton.addEventListener('click',()=>downloadText(v.payload.name+'-'+v.payload.version+'-SKILL.md',v.payload.instructions));actions.append(exportButton);}
+      if(v.kind==='skill'){const exportButton=node('button','导出草稿 SKILL.md');exportButton.addEventListener('click',()=>downloadSkill({version_id:v.id},v.payload.name+'-SKILL.md').catch(err=>notice(err.message,true)));actions.append(exportButton);}
       else if(active?.version_id!==v.id){
         const note=node('textarea');note.maxLength=1000;note.placeholder='样本验证结果，或恢复旧版的依据（至少 10 字符）';note.setAttribute('aria-label','启用 '+v.label+' 的依据');card.append(note);
         const activate=node('button','启用此版本','primary');activate.addEventListener('click',async()=>{if(identity!==who||$('scope').value!==scope){notice('范围已变化，请刷新配置。',true);return;}activate.disabled=true;try{await api('/configuration/versions/'+v.id+'/activate',{scope,revision:active?.revision||0,note:note.value});await refreshConfiguration();notice('配置已启用；不修改已有记忆，不恢复暂停队列。');}catch(err){notice(err.message,true);}finally{activate.disabled=false;}});actions.append(activate);
       }
       card.append(actions);host.append(card);
     }
-    $('configuration-events').replaceChildren(...data.events.map(e=>node('p',new Date(e.created*1000).toLocaleString('zh-CN')+' · '+e.kind+' · '+e.note,'muted')));
-    const integrations=$('configuration-integrations');integrations.replaceChildren(node('p',data.integration.note),node('p','MCP 契约版本：'+data.integration.contract_sha256.slice(0,16)),node('p',data.integration.tools.join(' · ')));
+    function pageButton(parent,title,handler){const b=node('button',title);b.type='button';b.addEventListener('click',()=>{handler();refreshConfiguration(false).catch(err=>notice(err.message,true));});parent.append(b);}
+    const pages=node('div',undefined,'tile-actions');
+    if(data.offset>0)pageButton(pages,'上一页版本',()=>configurationOffset=Math.max(0,data.offset-20));
+    if(data.next_offset!==null)pageButton(pages,'下一页版本',()=>configurationOffset=data.next_offset);host.append(pages);
+    const choices=[...new Map([...data.versions,...Object.values(data.active).map(a=>a.version)].map(v=>[v.id,v])).values()];
+    const compareHost=$('configuration-compare');compareHost.replaceChildren(node('p','比较本页或当前启用版本。翻页可选择更早版本；差异展示不代表语义质量已通过。','muted'));
+    const selects=['旧版本','新版本'].map(title=>{const select=node('select');select.setAttribute('aria-label',title);for(const v of choices){const option=node('option',kindLabel[v.kind]+' · '+v.label+' · '+v.id.slice(0,8));option.value=v.id;select.append(option);}compareHost.append(select);return select;});
+    if(choices.length>1)selects[1].selectedIndex=1;
+    const compareButton=node('button','比较版本');compareButton.disabled=choices.length<2;const output=node('pre');
+    compareButton.addEventListener('click',async()=>{compareButton.disabled=true;try{const result=await api('/configuration/compare?'+new URLSearchParams({scope,left:selects[0].value,right:selects[1].value}));if(identity===who&&scope===$('scope').value&&epoch===configurationEpoch)output.textContent=result.changed?result.diff:'内容相同。';}catch(err){notice(err.message,true);}finally{compareButton.disabled=choices.length<2;}});
+    compareHost.append(compareButton,output);
+    $('configuration-events').replaceChildren(node('p','共 '+data.event_total+' 次启用 · 本页 '+data.events.length+' 次','muted'),...data.events.map(e=>node('p',new Date(e.created*1000).toLocaleString('zh-CN')+' · '+kindLabel[e.kind]+' · '+(e.previous_id||'基础配置')+' → '+e.version_id+' · '+e.note,'muted')));
+    if(data.event_offset>0)pageButton($('configuration-events'),'上一页启用记录',()=>configurationEventOffset=Math.max(0,data.event_offset-30));
+    if(data.event_next_offset!==null)pageButton($('configuration-events'),'下一页启用记录',()=>configurationEventOffset=data.event_next_offset);
+    const integrations=$('configuration-integrations');integrations.replaceChildren(node('p',data.integration.note),node('p','MCP：此服务代码契约 '+data.integration.contract_sha256.slice(0,16)+' · 客户端连接与版本未核验'),node('p',data.integration.tools.join(' · ')));
     if(identity.can_manage_agents){const credentials=node('button','管理 Agent 凭据与权限');credentials.addEventListener('click',()=>manageAgents().catch(err=>notice(err.message,true)));integrations.append(credentials);}
-    for(const skill of data.integration.skills){const detail=node('details');detail.append(node('summary',skill.name+' · '+skill.sha256.slice(0,12)),node('pre',skill.instructions));const exportButton=node('button','下载当前版本');exportButton.addEventListener('click',()=>downloadText(skill.name+'-SKILL.md',skill.instructions));detail.append(exportButton);integrations.append(detail);}
+    for(const skill of data.integration.skills){const detail=node('details');detail.append(node('summary',skill.name+' · 随此服务代码打包 · 客户端安装未知 · '+skill.sha256.slice(0,12)),node('pre',skill.instructions));const exportButton=node('button','下载随代码打包的 Skill');exportButton.addEventListener('click',()=>downloadSkill({name:skill.name},skill.name+'-SKILL.md').catch(err=>notice(err.message,true)));detail.append(exportButton);integrations.append(detail);}
   }
   $('configuration-refresh').addEventListener('click',()=>refreshConfiguration().catch(err=>notice(err.message,true)));
   $('configuration-form').addEventListener('submit',async e=>{
@@ -539,7 +574,7 @@
   }
   $('map-form').addEventListener('submit',e=>{e.preventDefault();refreshMap().catch(err=>notice(err.message,true));});
   $('map-more').addEventListener('click',()=>{if(mapNext!==null)refreshMap(mapNext).catch(err=>notice(err.message,true));});
-  $('scope').addEventListener('change',()=>{configurationData=null;++configurationEpoch;++mapEpoch;mapNext=null;$('configuration-versions').replaceChildren();$('configuration-events').replaceChildren();$('map-records').replaceChildren();$('map-diagram').replaceChildren();$('map-details').replaceChildren();showView();});
+  $('scope').addEventListener('change',()=>{configurationData=null;configurationOffset=0;configurationEventOffset=0;++configurationEpoch;++mapEpoch;$('configuration-active').replaceChildren();$('configuration-compare').replaceChildren();mapNext=null;$('configuration-versions').replaceChildren();$('configuration-events').replaceChildren();$('map-records').replaceChildren();$('map-diagram').replaceChildren();$('map-details').replaceChildren();showView();});
 
   function showView() {
     const requested=location.hash.slice(1);

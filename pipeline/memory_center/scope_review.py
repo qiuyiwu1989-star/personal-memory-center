@@ -58,6 +58,9 @@ def prepare_scope_review(source_type, messages, *, version, source_metadata=None
             reasons.append('source_without_extractable_evidence_not_quality_pass')
         elif covered < len(text):
             reasons.append('source_not_fully_covered_by_evidence')
+        neighbors = messages[max(0, position - 1):position] + messages[position + 1:position + 2]
+        if version == '2026-10-04.22' and any(CONDITION.search(other['text']) for other in neighbors):
+            reasons.append('neighbor_condition_requires_semantic_review')
         if CONDITION.search(text):
             reasons.append('condition_scope_requires_semantic_review')
             if any(CONDITION.search(text) and not CONDITION.search(item['quote'])
@@ -97,3 +100,52 @@ def prepare_scope_review(source_type, messages, *, version, source_metadata=None
             'review_targets': checks, 'quality_approved': False,
             'facts_confirmed': False, 'automatic_scope_release': False,
             'model_calls': 0, 'contains_private_source_text': True}
+
+
+def prepare_long_source_review(envelope, plan, *, version):
+    """Bind a complete original to archive segments and per-segment review.
+
+    This private offline work packet never invokes a provider or authorizes
+    independent segment extraction. Cross-segment context is navigation only;
+    partial or conditional messages remain explicit review blockers. Coverage
+    counts archive bytes and extracted evidence separately, never as quality.
+    """
+    from .long_source_plan import verify_long_source_plan
+    from .input_coverage import audit_input_coverage
+    if not isinstance(envelope, dict):
+        raise Invalid('长来源复核信封无效')
+    messages = envelope.get('messages')
+    verification = verify_long_source_plan(plan, messages)
+    for key in ('source_key', 'scope', 'source_type', 'source_metadata'):
+        expected = envelope.get(key, 'document' if key == 'source_type' else None)
+        if plan[key] != expected:
+            raise Invalid('长来源信封与归档计划不匹配')
+    original_coverage = audit_input_coverage(plan['source_type'], messages, version=version)
+    original_rows = {row['message_id']: row for row in original_coverage['items']}
+    segments = []
+    for segment in plan['segments']:
+        payload = segment['payload']
+        review = prepare_scope_review(payload['source_type'], payload['messages'],
+                                      version=version, source_metadata=payload['source_metadata'])
+        coverage = audit_input_coverage(payload['source_type'], payload['messages'], version=version)
+        original_row = original_rows[segment['original_message_id']]
+        review_reasons = list(segment['review_reasons'])
+        if coverage['items'][0]['route'] != original_row['route']:
+            review_reasons.append('segment_routing_differs_from_complete_source')
+        segments.append({'segment_id': segment['segment_id'],
+                         'original_locator': {key: segment[key] for key in
+                             ('message_index', 'original_message_id', 'start', 'end', 'global_start', 'global_end')},
+                         'context_navigation': copy.deepcopy(segment['context_navigation']),
+                         'review_reasons': review_reasons,
+                         'complete_source_route': original_row['route'],
+                         'automatic_extraction_authorized': False,
+                         'review_packet': review, 'input_coverage': coverage})
+    return {'packet_version': 'long-source-review-v1', 'method_version': version,
+            'original_envelope': copy.deepcopy(envelope), 'archive_verification': verification,
+            'complete_source_input_coverage': original_coverage,
+            'source_canonical_sha256': plan['source_canonical_sha256'], 'segments': segments,
+            'archive_characters': plan['source_characters'],
+            'extraction_evidence_characters': sum(s['input_coverage']['evidence_characters'] for s in segments),
+            'unreviewed_segments': len(segments), 'quality_approved': False,
+            'facts_confirmed': False, 'automatic_scope_release': False, 'model_calls': 0,
+            'contains_private_source_text': True}
