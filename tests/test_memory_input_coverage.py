@@ -8,13 +8,19 @@ class InputCoverageTests(unittest.TestCase):
     def audit(self,messages,kind='document'):
         return audit_input_coverage(kind,messages,version='2026-10-03.21')
     def test_long_document_not_ready_even_with_full_spans(self):
-        m=[{'id':'synthetic-long','role':'external','text':'合成会议记录。'*3000}]
+        m=[{'id':'synthetic-long','role':'external','text':'合成会议记录。'*4000}]
         before=copy.deepcopy(m);r=self.audit(m)
         self.assertFalse(r['input_ready_without_segmentation'])
         self.assertTrue(r['full_evidence_coverage'])
         self.assertEqual(r['total_characters'],r['evidence_characters'])
         self.assertEqual(m,before)
         self.assertFalse(r['quality_approved'])
+    def test_21000_ascii_fits_store_but_not_review_packet(self):
+        r=self.audit([{'id':'synthetic-ascii','role':'user','text':'x'*21000}])
+        self.assertTrue(r['input_ready_without_segmentation'])
+        self.assertFalse(r['review_ready_without_segmentation'])
+        self.assertIn('message_exceeds_review_limit',r['items'][0]['review_reasons'])
+        self.assertLessEqual(r['payload_characters'],24000)
     def test_reference_route_exclusion_never_passes_coverage(self):
         text='你是合成角色。\n核心使命：工作流程。'+('合成原件内容。'*100)
         r=self.audit([{'id':'synthetic-template','role':'external','text':text}])
@@ -33,6 +39,8 @@ class InputCoverageTests(unittest.TestCase):
         m={'id':'synthetic','role':'user','text':'合成决定。'}
         with self.assertRaises(Invalid):self.audit([m,m])
         with self.assertRaises(Invalid):self.audit([dict(m,role='system')])
+    def test_store_id_limit_cannot_be_reported_ready(self):
+        with self.assertRaises(Invalid):self.audit([{'id':'x'*101,'role':'user','text':'合成判断。'}])
     def test_unicode_counts_not_bytes_or_tokens(self):
         r=self.audit([{'id':'synthetic','role':'user','text':'合成😊。'}])
         self.assertEqual(r['total_characters'],4)
