@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const prefix = '/api/inside/memory-center/v1';
-  let token = '', identity = null, timer = null, refreshing = false, pendingJobs = false;
+  let token = '', identity = null, timer = null, refreshing = false, pendingJobs = false, refreshQueued = false;
   let documentData=[], documentCategory='', documentLeaf=false;
   let fileName='', fileRead=0, activeBatch=null, materialOffset=0;
   const labels = {archived:'已归档',paused_budget:'等待预算',ready:'待审核',discarded:'未采用',user_stated:'本人陈述', source_reported:'来源陈述', imported_summary:'导入摘要',agent_suggested:'AI 发言 · 未经本人确认',active:'可检索',superseded:'已被纠正',received:'待整理',processing:'正在提炼',applied:'提炼完成',failed:'失败',profile:'个人',preferences:'偏好',people:'人物',areas:'领域',projects:'项目',topics:'主题'};
@@ -128,7 +128,8 @@
     }
   }
   async function refresh() {
-    if(!identity || refreshing) return;
+    if(!identity) return;
+    if(refreshing){refreshQueued=true;return;}
     refreshing=true;
     const requestedToken=token, requestedScope=$('scope').value;
     try {
@@ -143,7 +144,7 @@
       const breakdown=data.status_counts||{};
       $('record-breakdown').textContent='当前范围：'+$('scope').selectedOptions[0].textContent+' · 原话提炼 '+(breakdown.source_reported||0)+' · AI 发言 '+(breakdown.agent_suggested||0)+' · 旧摘要 '+(breakdown.imported_summary||0)+' · 本人来源 '+(breakdown.user_stated||0)+'。抽取记录不等于已确认的长期记忆。';
       $('records').replaceChildren(); $('jobs').replaceChildren();
-      if(!data.records.length) $('records').append(node('p','还没有匹配的记忆。提交材料后，管家会在这里留下理解与依据。','empty'));
+      if(!data.records.length) $('records').append(node('p','还没有匹配的记忆。可以补充本人陈述，或提交资料后选择提炼；仅归档不会自动生成记忆。','empty'));
       if(data.truncated) $('records').append(node('p','当前展示前 100 条，请缩小搜索范围。','muted'));
       for(const r of data.records) {
         const card=node('article',undefined,'record memory-tile');card.dataset.topic=r.topic;card.dataset.status=r.status;card.dataset.lifecycle=r.lifecycle;card.dataset.governance=r.governance?.state||'candidate';card.dataset.usable=String(r.usable);
@@ -172,7 +173,8 @@
         (j.state==='archived'?['archived']:['received','processing','applied']).forEach((step,i)=>{const item=node('li',labels[step]);const stage=j.state==='archived'?0:['received','processing','applied'].indexOf(j.state);item.dataset.done=String(i<=stage);steps.append(item);});
         row.append(steps);
         if(j.state==='failed')row.append(node('p','处理未完成，查看错误后可重试。','muted'));
-        if(j.usage?.method==='session_agent') row.append(node('p','由本次会话 Agent 阅读原文整理；未调用后台模型，未单独计量 token。','muted'));
+        if(j.usage?.method==='owner_manual') row.append(node('p','本人手动维护，未调用模型。','muted'));
+        else if(j.usage?.method==='session_agent') row.append(node('p','由本次会话 Agent 阅读原文整理；未调用后台模型，未单独计量 token。','muted'));
         else if(j.usage) row.append(node('p','本次返回的 token：输入 '+(j.usage.prompt_tokens??'未知')+' / 输出 '+(j.usage.completion_tokens??'未知'),'muted'));
         row.append(node('p',methodLabel(j.usage?.method_version),'muted'));
         if(j.state==='failed')row.append(failureDetail(j.error));
@@ -182,12 +184,12 @@
         }
         $('jobs').append(row);
       }
-    } catch(err){notice(err.message,true);} finally{refreshing=false;}
+    } catch(err){notice(err.message,true);} finally{refreshing=false;if(refreshQueued){refreshQueued=false;refresh();}}
   }
   async function connect() {
     try {
       identity=await api('/status'); $('token').value='';
-      $('scope').replaceChildren(...identity.scopes.map(s=>{const o=node('option',s==='claude:sample-20260929'?'Claude 历史示范 · 2026-09-29':s==='claude:ark-20260929'?'Claude · 火山自动提炼':s==='claude:history-20260929'?'Claude · 历史批量整理':s);o.value=s;return o;}));
+      $('scope').replaceChildren(...identity.scopes.map(s=>{const o=node('option',s==='personal'?'个人记忆':s==='claude:sample-20260929'?'Claude 历史示范 · 2026-09-29':s==='claude:ark-20260929'?'Claude · 火山自动提炼':s==='claude:history-20260929'?'Claude · 历史批量整理':s);o.value=s;return o;}));
       $('ingest-scope').replaceChildren(...identity.scopes.filter(s=>s!=='claude:archive').map(s=>{const o=node('option',s==='personal'?'个人记忆':s==='claude:history-20260929'?'Claude 历史批量整理':s);o.value=s;return o;}));
       if(identity.scopes.includes('personal'))$('ingest-scope').value='personal';
       const requestedScope=new URLSearchParams(location.search).get('scope');
@@ -200,6 +202,9 @@
       $('method-version').textContent='v'+identity.method_version;
       $('ingest-form').hidden=!identity.actions.includes('write');
       ownerAdd.hidden=!identity.can_correct || !identity.actions.includes('write');
+      $('daily-owner-add').hidden=ownerAdd.hidden || !identity.scopes.includes('personal');
+      $('daily-upload').hidden=!identity.actions.includes('write');
+      $('daily-review').hidden=!identity.can_correct;
       agentManage.hidden=!identity.can_manage_agents;
       $('configuration-tab').hidden=!identity.can_correct || !identity.actions.includes('write');
       $('evidence-index').hidden=!identity.actions.includes('write') || !identity.actions.includes('source_read');
@@ -276,6 +281,8 @@
     const scope=$('scope').value,data=await api('/overview?'+new URLSearchParams({scope}));
     if(scope!==$('scope').value)return;
     $('memory-overview').replaceChildren();renderProjection(data.projection);
+    const start=$('personal-start');start.hidden=scope!=='personal'||data.usable>0;
+    start.textContent=data.candidates>0?'个人记忆已有 '+data.candidates+' 条候选；先核实归属、出处和有效时间，才可供 Agent 使用。':'个人记忆尚未建立。可以先补充一条当前偏好或项目决定，保存后核实；也可以先归档资料。';
     const stages=[['sources','原始资料','保留原文','ingest'],['candidates','待核实','抽取不等于事实','records'],['usable','可用记忆','按任务提供给 Agent','records'],['historical','历史变化','更正与旧判断可回查','records']];
     for(const [key,title,help,view] of stages){
       const box=node('button',undefined,'stage-card');box.dataset.stage=key;box.append(node('span',title),node('strong',String(data[key])),node('span',help));
@@ -297,6 +304,8 @@
     if(b.shared_token_limit!=null)$('budget-summary').textContent+=' · 含历史批次合计 '+(b.tokens_spent+b.legacy_tokens_spent).toLocaleString('zh-CN')+' / '+b.shared_token_limit.toLocaleString('zh-CN')+' tokens';
     $('budget-progress').max=Math.max(1,b.token_limit);$('budget-progress').value=b.tokens_spent;
     $('budget-settings').hidden=!identity.can_correct;
+    const exhausted=b.tokens_spent>=b.token_limit || (b.shared_token_limit!=null && b.tokens_spent+b.legacy_tokens_spent>=b.shared_token_limit);
+    $('daily-status').textContent=exhausted?'当前范围的模型预算已达到上限；资料归档、手动补充和核实仍可使用。':'资料归档、手动补充和核实不调用模型；选择提炼才使用预算，结果先作为候选。';
     if(!$('budget-form').contains(document.activeElement)){$('budget-limit').value=b.token_limit;$('budget-quality').checked=!!b.quality_approved;$('budget-note').value=b.note;}
   }
   $('budget-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{await api('/budget',{scope:$('scope').value,token_limit:Number($('budget-limit').value),quality_approved:$('budget-quality').checked,note:$('budget-note').value});notice('预算已保存；普通提炼和再次整理共用计量。Claude 历史批次需在原始资料中另行控制。');await refresh();}catch(err){notice(err.message,true);}finally{button.disabled=false;}});
@@ -356,7 +365,7 @@
     const entities=[['','未知'],...data.entities.map(e=>[e.id,e.name+' · '+e.id])];field('holder','谁认为',null,entities);field('subject_id','关于谁 / 什么',null,entities);field('as_of','何时成立','date');field('valid_until','何时失效（可空）','date');field('note','审核依据','text');
     const change=changeFields(grid,{existing:true});const save=node('button','保存审核状态','primary');form.append(grid,save);host.append(form);
     const registry=node('details');registry.append(node('summary','登记人物或项目（不自动合并同名人物）'));const entityForm=node('form'),eid=node('input'),name=node('input'),kind=node('select');eid.placeholder='稳定 ID，如 person:sample';eid.required=true;name.placeholder='名称';name.required=true;for(const [value,title] of [['person','人物'],['project','项目'],['organization','组织'],['topic','主题']]){const o=node('option',title);o.value=value;kind.append(o);}const add=node('button','登记实体');entityForm.append(eid,name,kind,add);registry.append(entityForm);host.append(registry);entityForm.addEventListener('submit',async e=>{e.preventDefault();try{if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;await api('/entities',{scope,id:eid.value,kind:kind.value,name:name.value,aliases:[]});if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;await reviewRecord(record);}catch(err){notice(err.message,true);}});
-    form.addEventListener('submit',async e=>{e.preventDefault();if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value){notice('范围或身份已变化，请重新打开审核。',true);return;}save.disabled=true;const body={revision:record.governance.revision};for(const [key,input] of Object.entries(fields))body[key]=input.value||null;try{change.apply(body);await api('/records/'+record.id+'/governance',body);if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;$('review-dialog').close();notice('审核状态已保存，来源和旧版本保留。');await refresh();}catch(err){if(epoch===reviewEpoch&&identity===activeIdentity&&scope===$('scope').value){notice(err.message,true);save.disabled=false;}}});$('review-notice').hidden=true;if(!$('review-dialog').open)$('review-dialog').showModal();
+    form.addEventListener('submit',async e=>{e.preventDefault();if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value){notice('范围或身份已变化，请重新打开审核。',true);return;}save.disabled=true;const body={revision:record.governance.revision};for(const [key,input] of Object.entries(fields))body[key]=input.value||null;try{change.apply(body);await api('/records/'+record.id+'/governance',body);if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;$('review-dialog').close();notice('审核状态已保存，来源和旧版本保留。'+($('record-governance').value==='candidate'&&body.state!=='candidate'?'该记录已退出待核实列表；可切换状态查看。':''));await refresh();}catch(err){if(epoch===reviewEpoch&&identity===activeIdentity&&scope===$('scope').value){notice(err.message,true);save.disabled=false;}}});$('review-notice').hidden=true;if(!$('review-dialog').open)$('review-dialog').showModal();
   }
   const agentManage=node('button','Agent 接入');agentManage.hidden=true;
   $('refresh').after(agentManage);agentManage.addEventListener('click',()=>manageAgents().catch(err=>notice(err.message,true)));
@@ -389,12 +398,20 @@
   }
   $('review-dialog').addEventListener('cancel',()=>{++reviewEpoch;});
   $('review-dialog').addEventListener('close',()=>{++reviewEpoch;if($('review-content').dataset.credentials){$('review-content').querySelectorAll('textarea').forEach(input=>{input.value='';});$('review-content').replaceChildren();delete $('review-content').dataset.credentials;}});
+  $('daily-upload').addEventListener('click',()=>{location.hash='ingest';$('processing-policy').value='archive';showView();if(identity?.can_correct)refreshMaterials(true).catch(err=>notice(err.message,true));});
+  $('daily-review').addEventListener('click',()=>{location.hash='records';$('record-governance').value='candidate';$('history').checked=false;$('query').value='';$('record-kind').value='';$('record-status').value='';showView();refresh();});
+  $('daily-owner-add').addEventListener('click',()=>{
+    if(!identity?.can_correct || !identity.actions.includes('write') || !identity.scopes.includes('personal'))return;
+    if($('scope').value!=='personal'){$('scope').value='personal';$('scope').dispatchEvent(new Event('change'));}
+    $('history').checked=false;$('query').value='';$('record-kind').value='';$('record-status').value='';$('record-governance').value='candidate';
+    location.hash='records';showView();ownerEditor();refresh();
+  });
   const ownerAdd=node('button','新增本人陈述','primary');ownerAdd.hidden=true;
   $('records').before(ownerAdd);ownerAdd.addEventListener('click',()=>ownerEditor());
   function ownerEditor(record){
     ++reviewEpoch;const activeIdentity=identity,scope=record?.scope||$('scope').value,host=$('review-content');
     host.replaceChildren();$('review-title').textContent=record?'补充 / 修改记忆':'新增本人陈述';
-    host.append(node('p','保存为待核实候选；核实归属和有效时间后，可用「核实 / 标记」确认。旧版本与原证据保留，不调用模型。','muted'));
+    host.append(node('p','保存为待核实候选；关于自己的陈述，可在「核实 / 标记」中选择本人，并填写实际成立时间。引用他人观点时保留其归属。旧版本与原证据保留，不调用模型。','muted'));
     const form=node('form'),grid=node('div',undefined,'review-grid'),fields={};
     function field(key,title,value,choices){const box=node('div'),input=node(choices?'select':key==='statement'?'textarea':'input');input.setAttribute('aria-label',title);
       if(choices)for(const [v,t] of choices){const option=node('option',t);option.value=v;input.append(option);}

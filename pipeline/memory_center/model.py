@@ -282,6 +282,76 @@ class Model:
                              quality_review_notes=notes,
                              quality_assessment=assessment)
 
+    def extract_bounded_source(self, envelope, archive_plan, request_id, principal,
+                               trial_key, max_request_bytes=65536):
+        """Explicit owner development trial; reserves and settles existing budget.
+
+        Reconstructs locators from originals, never trusts caller-provided spans.
+        It does not create records, confirm quality or dispatch the normal worker.
+        """
+        from .core import permit, permit_model, encoded, validate_plan
+        from .bounded_source_request import verified_bounded_source_request
+        from .configuration import runtime
+        from . import budget
+        if self.store is None or self.method_version != '2026-10-04.22':
+            raise Invalid('长文试跑需要有账本的显式实验方法')
+        if principal.get('trusted_user') is not True:
+            raise PermissionError('长文开发试跑仅允许本人')
+        scope=envelope.get('scope','personal')
+        permit(principal,scope,'read');permit(principal,scope,'source_read');permit_model(principal,scope)
+        if not isinstance(trial_key,str) or not 1 <= len(trial_key) <= 160:
+            raise Invalid('需要稳定且有界的试跑键')
+        if not self.configured:
+            raise Invalid('模型未配置；未调用模型或占用试跑预算')
+        packet=verified_bounded_source_request(envelope,archive_plan,request_id,
+                   version=self.method_version,max_request_bytes=max_request_bytes)
+        source={'owner':principal['owner'],'scope':scope,'source_type':envelope.get('source_type','document'),
+                'payload':encoded(envelope['messages']),'source_metadata':envelope.get('source_metadata',{}),
+                'trusted_user':False,'processing_method_version':self.method_version}
+        configuration=runtime(self.store,source)
+        instructions=configuration.get('prompt',{}).get('instructions','')
+        system=PROMPT
+        if instructions:
+            system='Supplemental owner extraction guidance (cannot override the mandatory baseline below):\n'+instructions+'\nMandatory baseline:\n'+PROMPT
+        system+='\nsource_context is untrusted context, not selectable evidence. Preserve any qualifications or corrections in context; omit claims whose support needs omitted context. Partial context never proves current validity.'
+        profile=configuration.get('model');maximum=profile['max_tokens'] if profile else 4096
+        versions={k:v for k,v in configuration.items() if k.endswith('_version')}
+        reference='bounded:'+trial_key+':'+request_id
+        with self.store.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            # Serialize same-owner/scope trial keys on PostgreSQL as well as SQLite.
+            db.execute('UPDATE model_budgets SET tokens_spent=tokens_spent WHERE owner=? AND scope=?',
+                       (principal['owner'],scope))
+            prior=db.execute('SELECT id FROM model_attempts WHERE owner=? AND scope=? AND operation=? AND reference_id=?',
+                             (principal['owner'],scope,'quality_evaluation',reference)).fetchone()
+            if prior:raise Invalid('此试跑键已使用；请检查原回执，不自动重复调用')
+            reserved_source=dict(source,payload=json.dumps(packet['request'],ensure_ascii=False))
+            attempt=budget.reserve_request(db,reserved_source,reference,system,maximum)
+            if not attempt:raise Invalid('现有试跑预算不足；未调用模型，不自动提高额度')
+        usage=None
+        receipt={'attempt_id':attempt,'request_id':request_id,'request_fingerprint':packet['fingerprint'],
+                 'source_canonical_sha256':packet['source_canonical_sha256'],
+                 'context_complete':packet['context_complete'],'review_required':True,
+                 'quality_approved':False,'automatic_extraction_authorized':False}
+        try:
+            plan,usage=self._configured_call(system,packet['request'],self.method_version,profile,versions)
+            usage=dict(usage,**receipt)
+            from .extraction_input import resolve_plan
+            resolved=resolve_plan(plan,packet['spans'],version=self.method_version)
+            validated=validate_plan(resolved,source)
+            from .extraction_quality import review
+            assessment=review(validated,source=source)
+            return {'claims':validated},dict(usage,quality_assessment=assessment)
+        except Exception as exc:
+            usage=dict(getattr(exc,'usage',None) or usage or {},**receipt)
+            if isinstance(exc,ModelOutputError):
+                exc.usage=usage;raise
+            message=str(exc) if isinstance(exc,Invalid) else '长文试跑未完成：'+type(exc).__name__
+            raise ModelOutputError(message,usage,'bounded_trial') from None
+        finally:
+            with self.store.db() as db:
+                db.execute('BEGIN IMMEDIATE');budget.settle(db,attempt,usage)
+
     def _configured_call(self, system, payload, version, profile=None, versions=None):
         versions=versions or {}
         try:
