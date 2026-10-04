@@ -6,7 +6,7 @@
   let documentData=[], documentCategory='', documentLeaf=false;
   let fileName='', fileRead=0, activeBatch=null, materialOffset=0;
   const labels = {archived:'已归档',paused_budget:'等待预算',ready:'待审核',discarded:'未采用',user_stated:'本人陈述', source_reported:'来源陈述', imported_summary:'导入摘要',agent_suggested:'AI 发言 · 未经本人确认',active:'可检索',superseded:'已被纠正',received:'待整理',processing:'正在提炼',applied:'提炼完成',failed:'失败',profile:'个人',preferences:'偏好',people:'人物',areas:'领域',projects:'项目',topics:'主题'};
-  function notice(message, error=false) { $('notice').hidden=!message; $('notice').textContent=message; $('notice').dataset.error=String(error); }
+  function notice(message, error=false) { $('notice').hidden=!message; $('notice').textContent=message; $('notice').dataset.error=String(error); const modal=$('review-notice'); if(modal){modal.hidden=!(message&&error&&$('review-dialog').open);modal.textContent=modal.hidden?'':message;} }
   async function api(path, body) {
     const response = await fetch(prefix+path,{method:body===undefined?'GET':'POST',headers:{...(token?{Authorization:'Bearer '+token}:{'X-Memory-Local':'1'}),'Content-Type':'application/json'},cache:'no-store',body:body===undefined?undefined:JSON.stringify(body)});
     const data = await response.json();
@@ -14,6 +14,14 @@
     return data;
   }
   function node(tag,text,cls) { const el=document.createElement(tag); if(text!==undefined) el.textContent=text; if(cls)el.className=cls; return el; }
+  function methodLabel(version) {
+    return version && version !== 'legacy' ? '提炼方法 '+version : '提炼方法未记录';
+  }
+  function failureDetail(error) {
+    const detail=node('details',undefined,'failure-detail');
+    detail.append(node('summary','失败原因'),node('p',error||'服务未返回具体原因；请查看处理任务。'));
+    return detail;
+  }
   function batchView(batch, sourceBatch) {
     const host=$('bulk-controls'), actions=$('bulk-actions');host.hidden=false;actions.replaceChildren();
     if(!batch){
@@ -64,15 +72,17 @@
     for(const item of data.materials){
       const card=node('article',undefined,'record topic-tile');
       card.append(node('h3',item.title||'未命名资料'),node('p',new Date(item.created*1000).toLocaleString('zh-CN')+' · '+item.message_count+' 段内容 · '+item.scope,'muted'));
-      const state=item.state==='archived'?'原文已归档 · 未调用模型':item.state==='applied'?'已完成提炼 · '+item.claim_count+' 条记忆':item.state==='failed'?'处理失败':item.state==='processing'?'正在提炼':'等待处理';
+      const state=item.state==='archived'?'原文已归档 · 未调用模型':item.state==='applied'?'提炼完成 · '+item.claim_count+' 条抽取记录':item.state==='failed'?'处理失败':item.state==='processing'?'正在提炼':'等待处理';
       card.append(node('span',state,'tag'),node('p',item.preview||'无文字预览','material-preview'));
       const indexState=item.index_status?.state;
       if(indexState && indexState!=='idle')card.append(node('p',indexState==='ready'?'本范围原文索引已更新':indexState==='failed'?'原文索引待重试':'本范围原文索引更新中','muted'));
-      if(item.method_version!=='legacy')card.append(node('p','提炼方法 '+item.method_version,'muted'));
+      card.append(node('p',methodLabel(item.method_version),'muted'));
+      if(item.state==='applied')card.append(node('p','提炼完成不代表质量已验收或已成为长期记忆。','muted'));
+      if(item.state==='failed')card.append(failureDetail(item.error));
       const buttons=node('div',undefined,'tile-actions'),read=node('button','查看原文');
       read.addEventListener('click',async()=>{read.disabled=true;try{const raw=await api('/materials/'+item.id);openDocument(item.title||'原始资料',raw.messages.map(m=>'['+m.role+'] '+m.text).join('\n\n'));}catch(err){notice(err.message,true);}finally{read.disabled=false;}});buttons.append(read);
       if(item.state==='failed' && item.job_id){const retry=node('button','重试整理','primary');retry.addEventListener('click',async()=>{retry.disabled=true;try{await api('/jobs/'+item.job_id+'/retry',{});await refreshMaterials(true);}catch(err){notice(err.message,true);retry.disabled=false;}});buttons.append(retry);}
-      if(identity.can_correct){const reextract=node('button','再次整理');let requestKey;reextract.addEventListener('click',async()=>{reextract.disabled=true;requestKey ||= crypto.randomUUID();try{await api('/materials/'+item.id+'/reextract',{request_key:requestKey});location.hash='jobs';showView();await refreshRuns();notice('已入队；按现有预算提炼，结果先供比较。');}catch(err){notice(err.message,true);reextract.disabled=false;}});buttons.append(reextract);}
+      if(identity.can_correct){const reextract=node('button','再次提炼并比较');let requestKey;reextract.addEventListener('click',async()=>{reextract.disabled=true;requestKey ||= crypto.randomUUID();try{await api('/materials/'+item.id+'/reextract',{request_key:requestKey});location.hash='jobs';showView();await refreshRuns();notice('已入队；按现有预算提炼，结果先供比较。');}catch(err){notice(err.message,true);reextract.disabled=false;}});buttons.append(reextract);}
       card.append(buttons);$('materials-list').append(card);
     }
     materialOffset+=data.materials.length;$('materials-more').hidden=materialOffset>=data.total;
@@ -164,7 +174,8 @@
         if(j.state==='failed')row.append(node('p','处理未完成，查看错误后可重试。','muted'));
         if(j.usage?.method==='session_agent') row.append(node('p','由本次会话 Agent 阅读原文整理；未调用后台模型，未单独计量 token。','muted'));
         else if(j.usage) row.append(node('p','本次返回的 token：输入 '+(j.usage.prompt_tokens??'未知')+' / 输出 '+(j.usage.completion_tokens??'未知'),'muted'));
-        if(j.error) row.append(node('p',j.error));
+        row.append(node('p',methodLabel(j.usage?.method_version),'muted'));
+        if(j.state==='failed')row.append(failureDetail(j.error));
         if(j.state==='failed' && identity.actions.includes('write')) {
           if(j.source_key?.startsWith('claude:archive:')){const link=node('button','在原始资料中处理');link.addEventListener('click',()=>{location.hash='archives';showView();});row.append(link);}
           else {const retry=node('button','重试');retry.addEventListener('click',async()=>{retry.disabled=true;try{await api('/jobs/'+j.id+'/retry',{});await refresh();}catch(err){notice(err.message,true);retry.disabled=false;}});row.append(retry);}
@@ -293,8 +304,8 @@
     $('extraction-runs').replaceChildren();
     if(!data.runs.length)$('extraction-runs').append(node('p','尚无再次整理或翻译任务。','empty'));
     for(const run of data.runs){
-      const card=node('article',undefined,'run-card');card.append(node('h3',run.operation==='translate'?'中文译文':'再次提炼'),node('span',labels[run.state]||run.state,'tag'),node('p',run.source_key,'muted'),node('p',run.method_version+' · '+run.attempts+' 次尝试','muted'));
-      if(run.error)card.append(node('p',run.error,'muted'));
+      const card=node('article',undefined,'run-card');card.append(node('h3',run.operation==='translate'?'中文译文':'再次提炼'),node('span',labels[run.state]||run.state,'tag'),node('p',run.source_key,'muted'),node('p',methodLabel(run.method_version)+' · '+run.attempts+' 次尝试','muted'));
+      if(run.state==='failed')card.append(failureDetail(run.error));
       if(run.usage)card.append(node('p','返回用量 '+(run.usage.total_tokens??'未知')+' tokens','muted'));
       if(run.state==='ready'){const button=node('button','查看差异','primary');button.addEventListener('click',()=>reviewRun(run).catch(err=>notice(err.message,true)));card.append(button);}
       if(run.state==='failed' && identity.can_correct){const retry=node('button','重试');retry.addEventListener('click',async()=>{retry.disabled=true;try{await api('/extraction-runs/'+run.id+'/control',{action:'retry'});await refreshRuns();}catch(err){notice(err.message,true);retry.disabled=false;}});card.append(retry);}
@@ -317,7 +328,7 @@
     if(!data.changes.length)form.append(node('p','本次没有提出可保存的候选。','muted'));
     const accept=node('button',run.operation==='translate'?'采用中文译文':'采用选中的候选','primary'),discard=node('button','本次不采用');discard.type='button';form.append(accept,discard);host.append(form);
     async function submit(action,indices){accept.disabled=true;discard.disabled=true;try{await api('/extraction-runs/'+run.id+'/control',{action,indices});$('review-dialog').close();await refresh();}catch(err){notice(err.message,true);accept.disabled=false;discard.disabled=false;}}
-    form.addEventListener('submit',e=>{e.preventDefault();const indices=checks.filter(c=>c.checked).map(c=>Number(c.value));if(!indices.length){notice('先选择要采用的候选。',true);return;}submit('apply',indices);});discard.addEventListener('click',()=>submit('discard'));$('review-dialog').showModal();
+    form.addEventListener('submit',e=>{e.preventDefault();const indices=checks.filter(c=>c.checked).map(c=>Number(c.value));if(!indices.length){notice('先选择要采用的候选。',true);return;}submit('apply',indices);});discard.addEventListener('click',()=>submit('discard'));$('review-notice').hidden=true;if(!$('review-dialog').open)$('review-dialog').showModal();
   }
   function changeFields(host,{existing=false,owner=false}={}){
     const box=node('div'),kind=node('select');kind.setAttribute('aria-label','此次变化类型（可选）');
@@ -343,8 +354,8 @@
     field('priority','保存优先级',null,[['P0','P0 · 身份与重要更正'],['P1','P1 · 关系与关键决策'],['P2','P2 · 持续偏好'],['P3','P3 · 档案与讨论']]);
     const entities=[['','未知'],...data.entities.map(e=>[e.id,e.name+' · '+e.id])];field('holder','谁认为',null,entities);field('subject_id','关于谁 / 什么',null,entities);field('as_of','何时成立','date');field('valid_until','何时失效（可空）','date');field('note','审核依据','text');
     const change=changeFields(grid,{existing:true});const save=node('button','保存审核状态','primary');form.append(grid,save);host.append(form);
-    const registry=node('details');registry.append(node('summary','登记人物或项目（不自动合并同名人物）'));const entityForm=node('form'),eid=node('input'),name=node('input'),kind=node('select');eid.placeholder='稳定 ID，如 person:sample';eid.required=true;name.placeholder='名称';name.required=true;for(const [value,title] of [['person','人物'],['project','项目'],['organization','组织'],['topic','主题']]){const o=node('option',title);o.value=value;kind.append(o);}const add=node('button','登记实体');entityForm.append(eid,name,kind,add);registry.append(entityForm);host.append(registry);entityForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/entities',{scope:$('scope').value,id:eid.value,kind:kind.value,name:name.value,aliases:[]});$('review-dialog').close();await reviewRecord(record);}catch(err){notice(err.message,true);}});
-    form.addEventListener('submit',async e=>{e.preventDefault();if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value){notice('范围或身份已变化，请重新打开审核。',true);return;}save.disabled=true;const body={revision:record.governance.revision};for(const [key,input] of Object.entries(fields))body[key]=input.value||null;try{change.apply(body);await api('/records/'+record.id+'/governance',body);if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;$('review-dialog').close();notice('审核状态已保存，来源和旧版本保留。');await refresh();}catch(err){if(epoch===reviewEpoch&&identity===activeIdentity&&scope===$('scope').value){notice(err.message,true);save.disabled=false;}}});$('review-dialog').showModal();
+    const registry=node('details');registry.append(node('summary','登记人物或项目（不自动合并同名人物）'));const entityForm=node('form'),eid=node('input'),name=node('input'),kind=node('select');eid.placeholder='稳定 ID，如 person:sample';eid.required=true;name.placeholder='名称';name.required=true;for(const [value,title] of [['person','人物'],['project','项目'],['organization','组织'],['topic','主题']]){const o=node('option',title);o.value=value;kind.append(o);}const add=node('button','登记实体');entityForm.append(eid,name,kind,add);registry.append(entityForm);host.append(registry);entityForm.addEventListener('submit',async e=>{e.preventDefault();try{if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;await api('/entities',{scope,id:eid.value,kind:kind.value,name:name.value,aliases:[]});if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;await reviewRecord(record);}catch(err){notice(err.message,true);}});
+    form.addEventListener('submit',async e=>{e.preventDefault();if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value){notice('范围或身份已变化，请重新打开审核。',true);return;}save.disabled=true;const body={revision:record.governance.revision};for(const [key,input] of Object.entries(fields))body[key]=input.value||null;try{change.apply(body);await api('/records/'+record.id+'/governance',body);if(epoch!==reviewEpoch||identity!==activeIdentity||scope!==$('scope').value)return;$('review-dialog').close();notice('审核状态已保存，来源和旧版本保留。');await refresh();}catch(err){if(epoch===reviewEpoch&&identity===activeIdentity&&scope===$('scope').value){notice(err.message,true);save.disabled=false;}}});$('review-notice').hidden=true;if(!$('review-dialog').open)$('review-dialog').showModal();
   }
   const agentManage=node('button','Agent 接入');agentManage.hidden=true;
   $('refresh').after(agentManage);agentManage.addEventListener('click',()=>manageAgents().catch(err=>notice(err.message,true)));
@@ -373,7 +384,7 @@
         if(result.token){const raw=node('textarea');raw.readOnly=true;raw.value=result.token;raw.autocomplete='off';raw.setAttribute('aria-label','新Token，仅显示一次');secretHost.append(node('p','请现在复制到 Agent 的私有认证配置。关闭后不再显示；不要放进聊天、URL或公开仓库。','muted'),raw);}else secretHost.append(node('p',result.notice||'原值不能恢复，请撤销后重新创建。','muted'));
         const latest=await api('/agent-credentials');if(isCurrent()){render(latest.credentials);save.disabled=false;}}
       catch(err){if(isCurrent()){notice(err.message,true);save.disabled=false;}}
-    });$('review-dialog').showModal();
+    });$('review-notice').hidden=true;if(!$('review-dialog').open)$('review-dialog').showModal();
   }
   $('review-dialog').addEventListener('cancel',()=>{++reviewEpoch;});
   $('review-dialog').addEventListener('close',()=>{++reviewEpoch;if($('review-content').dataset.credentials){$('review-content').querySelectorAll('textarea').forEach(input=>{input.value='';});$('review-content').replaceChildren();delete $('review-content').dataset.credentials;}});
@@ -410,7 +421,7 @@
       const current=JSON.stringify(body);if(fingerprint!==current){fingerprint=current;requestKey=crypto.randomUUID();}body.request_key=requestKey;save.disabled=true;
       try{await api(record?'/records/'+record.id+'/revise':'/owner-records',body);if(identity!==activeIdentity||$('scope').value!==scope||!host.contains(form)||!$('review-dialog').open)return;$('review-dialog').close();notice(body.governance.state==='rejected'?'已设为不采纳，旧版本保留；未调用模型。':'候选已保存，索引自动更新；未调用模型。');await refresh();}
       catch(err){if(identity===activeIdentity&&$('scope').value===scope&&host.contains(form)&&$('review-dialog').open){notice(err.message,true);save.disabled=false;}}
-    });$('review-dialog').showModal();
+    });$('review-notice').hidden=true;if(!$('review-dialog').open)$('review-dialog').showModal();
   }
   $('review-close').addEventListener('click',()=>{++reviewEpoch;$('review-dialog').close();});
 

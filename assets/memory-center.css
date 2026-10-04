@@ -37,3 +37,5 @@ body.memory-module{margin:0;background:var(--v-bg);color:var(--v-ink)}
 .mc-page .diff-item{padding:14px;border:1px solid var(--v-line);border-radius:6px;margin:12px 0}.mc-page .diff-item input{width:auto}.mc-page .review-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.mc-page .review-grid textarea{min-height:90px}
 @media(max-width:760px){.mc-page .memory-overview{grid-template-columns:repeat(2,1fr)}.mc-page .review-grid{grid-template-columns:1fr}}
 .mc-page .markdown-reader{max-height:65vh;overflow:auto;line-height:1.8;padding:8px 0}.mc-page .markdown-reader h1{font-size:23px;margin:16px 0}.mc-page .markdown-reader h2{font-size:17px;border-bottom:1px solid var(--v-line);padding-bottom:8px;margin-top:26px}.mc-page .markdown-reader h3{font-size:14px;margin-top:18px}.mc-page .markdown-reader p{overflow-wrap:anywhere;margin:10px 0}
+
+.mc-page .failure-detail{border-left:2px solid var(--v-danger);padding-left:10px;margin:10px 0;overflow-wrap:anywhere}.mc-page .failure-detail summary{color:var(--v-danger)}.mc-page .failure-detail p{white-space:pre-wrap;font-size:12px}

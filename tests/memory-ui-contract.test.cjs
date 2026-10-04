@@ -10,19 +10,20 @@ class Element {
   querySelectorAll(){return [];} showModal(){this.open=true;} close(){this.open=false;}
   async emit(kind){for(const fn of this.listeners[kind]||[])await fn({preventDefault(){},submitter:this});}
 }
-function setup(){
+function setup(getResponses={},postResponses={}){
   const ids=new Map(),$=id=>{if(!ids.has(id))ids.set(id,new Element());return ids.get(id);};
   $('scope').value='personal';$('ingest-scope').value='personal';$('source-type').value='document';$('processing-policy').value='archive';$('source-visibility').value='unknown';
   const calls=[],window={addEventListener(){}};
   const context={document:{getElementById:$,createElement:t=>new Element(t),querySelectorAll:()=>[],querySelector:()=>null},window,
     location:{hash:''},URLSearchParams,TextEncoder,crypto:webcrypto,MemoryFiles:require('../assets/memory-files.js'),setInterval:()=>1,clearInterval(){},fetch:async(url,options)=>{
-      if(options.method==='GET')return {ok:true,json:async()=>({entities:[]})};
+      if(options.method==='GET')return {ok:true,json:async()=>getResponses[new URL(url,'http://synthetic').pathname]||({entities:[]})};
       calls.push({url,body:JSON.parse(options.body)});
+      const known=postResponses[new URL(url,'http://synthetic').pathname];if(known)return {ok:true,json:async()=>known};
       return {ok:false,json:async()=>({error:'纠正时间审计需要先应用独立的 007 迁移'})};
     }};
   let script=fs.readFileSync(require.resolve('../assets/memory-center.js'),'utf8');
   // Expose closures in this isolated test context; production code is unmodified.
-  script=script.replace(/  connect\(\);\n\}\)\(\);\s*$/, '  window.testUI={ownerEditor,reviewRecord,renderProjection};\n})();');
+  script=script.replace(/  connect\(\);\n\}\)\(\);\s*$/, '  window.testUI={ownerEditor,reviewRecord,renderProjection,methodLabel,failureDetail,refreshMaterials,setIdentity:p=>identity=p};\n})();');
   vm.runInNewContext(script,context);return {$,calls,ui:window.testUI};
 }
 function find(root,predicate){if(predicate(root))return root;for(const child of root.children){const result=find(child,predicate);if(result)return result;}}
@@ -81,4 +82,38 @@ test('upload visibility is explicit metadata; unknown preserves legacy payload',
     assert.equal(body.processing_policy,'archive');assert.equal(body.scope,'personal');
     assert.equal(body.source_metadata.attachments_verified,undefined);
   }
+});
+
+test('source state details expose unknown method and literal failure safely',()=>{
+  const {ui}=setup();assert.equal(ui.methodLabel(undefined),'提炼方法未记录');
+  assert.equal(ui.methodLabel('legacy'),'提炼方法未记录');assert.equal(ui.methodLabel('v21'),'提炼方法 v21');
+  const detail=ui.failureDetail('<img src=x onerror=alert(1)>');
+  assert.equal(detail.children[0].textContent,'失败原因');assert.equal(detail.children[1].textContent,'<img src=x onerror=alert(1)>');
+  assert.match(ui.failureDetail('').children[1].textContent,/未返回/);
+});
+
+test('actual material renderer labels extraction honestly and renders failure without HTML',async()=>{
+  const base={created:0,message_count:1,scope:'personal',preview:'Synthetic.',method_version:'legacy',claim_count:0};
+  const {$,ui}=setup({'/api/inside/memory-center/v1/materials':{total:3,materials:[
+    {...base,id:'a',title:'A',state:'archived'}, {...base,id:'b',title:'B',state:'applied'},
+    {...base,id:'c',title:'C',state:'failed',error:'<script>synthetic</script>'}]}});
+  ui.setIdentity({can_correct:true});await ui.refreshMaterials(true);
+  const cards=$('materials-list').children;assert.equal(cards.length,3);
+  assert.ok(find(cards[0],e=>e.textContent==='提炼方法未记录'));
+  assert.ok(find(cards[1],e=>e.textContent==='提炼完成 · 0 条抽取记录'));
+  assert.ok(find(cards[1],e=>/不代表质量/.test(e.textContent||'')));
+  assert.ok(find(cards[2],e=>e.textContent==='<script>synthetic</script>'));
+  assert.ok(find(cards[2],e=>e.textContent==='再次提炼并比较'));
+});
+
+test('registering an entity refreshes an open review without queued close invalidating its epoch',async()=>{
+  const {$,calls,ui}=setup({'/api/inside/memory-center/v1/entities':{entities:[{id:'owner',name:'Synthetic owner'},{id:'project:atlas',name:'Atlas'}]}},{'/api/inside/memory-center/v1/entities':{id:'project:atlas'}});
+  ui.setIdentity({can_correct:true});await ui.reviewRecord({id:'synthetic',statement:'Synthetic.',quote:'Synthetic.',governance:{revision:1,state:'candidate'}});
+  let closeCalls=0;$('review-dialog').close=()=>{closeCalls++;$('review-dialog').open=false;};
+  const registry=find($('review-content'),e=>e.tagName==='details');const entityForm=form(registry);
+  entityForm.children[0].value='project:atlas';entityForm.children[1].value='Atlas';entityForm.children[2].value='project';
+  await entityForm.emit('submit');assert.equal(closeCalls,0);assert.equal($('review-dialog').open,true);
+  field($('review-content'),'治理状态').value='verified';await form($('review-content')).emit('submit');
+  assert.equal(calls[1].url,'/api/inside/memory-center/v1/records/synthetic/governance');
+  assert.equal(calls[1].body.state,'verified');assert.equal($('review-notice').hidden,false);assert.match($('review-notice').textContent,/007/);
 });
