@@ -64,3 +64,19 @@ assert all(p['processing_policy'] == 'archive' for p in parts)
 ```sh
 .venv/bin/python -m unittest discover -s tests -p test_memory_import_adapter.py -v
 ```
+
+
+## 2026-10-05 外围交付与回执边界
+
+外围客户端保留原件和不可变 outbox：每个来源版本/分段的 payload、source_key、scope、
+客户端 principal、发送状态、服务端 id/job_id/duplicate 回执与最后一次状态核对。
+这些是可靠交付约定，不表示本仓库适配器已替客户端实现持久队列。
+
+同内容重试须使用同 principal 和完全相同 payload。源文件改动另存新版本；本地删除
+留存 pending-withdrawal 请求，不能标为已远端撤回。当前撤回 MCP 是 owner-only，
+外围 Token 无此权限；工作台本人完成逐来源撤回后才能凭回执对账。parent_source_key
+不构成父子批量治理 API，也不表示中心已获取本地附件或完整磁盘资料。
+
+实际客户端联调必须独立验收归档、Unicode 分段、HTTP200工具错误、未知发送结果、
+重复回执、权限隔离及 owner 撤回后的读取失效；合成测试通过不等于已接入真实资料。
+完整回执/版本规则见 [导入参考](../skills/memory-capture/references/import.md)。

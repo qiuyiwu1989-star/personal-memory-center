@@ -25,7 +25,7 @@ are separate authorized writes with their existing budget/quality gates.
 
 ## Capability and continuation
 
-Current server adds `memory_candidate_search` to the prior tools. Probe the actual
+The current source-governance server advertises 12 tools, including `memory_candidate_search` and two owner-only source-withdrawal tools. Probe the actual
 `tools/list` schema for query/scope strings, max_chars/offset/window_limit integers and
 retrieval_mode string. Only query is required by the current interface. Do not infer a
 capability from a fixed tool count. If absent or incompatible, report the window feature
@@ -51,7 +51,7 @@ documents. Legacy `memory_search` has no offset API.
 
 ## Empty, unavailable and denied are different
 
-- Successful empty `memory_context`: no matching currently usable verified background;
+- Successful empty `memory_context` with total=0: no matching currently usable verified background;
   explain the gap without auto-promoting candidates. An evidence investigation may still
   explicitly search candidates in the same authorized scope.
 - Missing/incompatible tool schema: capability unavailable; explain supported compatibility
@@ -74,3 +74,33 @@ Source roles/dates/index versions do not establish identity or validity. Duplica
 and candidate representations are the same source, not independent corroboration. Owner
 text corrections remain candidates until explicit governance review; only verified records
 passing completeness and validity checks enter trusted context.
+
+
+## Transport and result handling
+
+Current service uses stateless Streamable HTTP with JSON responses, so it does not
+require Mcp-Session-Id. Still initialize, accept the negotiated supported protocol,
+send notifications/initialized and discover tools. If another compatible deployment
+returns a session header, retain it on subsequent calls. Capability/permission failures
+must not trigger scope changes. Do not assume a session or protocol from a stale export.
+
+Distinguish HTTP/network, JSON-RPC error, tool result isError, and job state. An MCP
+permission/validation failure can be HTTP 200 with result.isError=true; HTTP success
+alone is not a successful import/read. Never turn a denied or malformed result into
+records=[]. Prefer structuredContent, otherwise decode JSON TextContent. Safe diagnostic
+reports contain phase/status/error type and pointers, not bearer values or private text.
+Stable machine-readable service error codes are not yet guaranteed across all layers.
+
+For context, records=[] with total>0 or truncated=true can mean the budget omitted
+whole eligible items; narrow the task query or increase an authorized character budget.
+It does not establish that the personal memory scope is empty. context_revision detects
+changes to eligible results but does not erase already-consumed external agent prompts.
+Refresh before reuse and discard held context when authorization/version changes.
+
+Owner-only memory_source_withdrawal_preview and memory_source_withdraw require
+trusted_user=true plus scope read/write. Their presence in tools/list never grants
+that authority to an inbox writer. Ordinary agents submit proposed corrections as
+attributed new evidence and ask the owner to review; they do not silently supersede
+or withdraw sources. A source withdrawal hides it and its dependent current projections,
+retains historical bytes, and preserves independent sources. Source groups, physical
+erasure and restoration are not implied by these two tools.

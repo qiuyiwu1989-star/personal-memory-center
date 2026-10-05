@@ -19,7 +19,7 @@
 
 所有读取均不调用提炼模型。分页与搜索预算为 **500–16,000 字符**，计算序列化返回信封，不能转换成精确账单 tokens。正文跟随 `next_offset` 拼接；检索返回 `truncated`；旧 memory_search 无 offset。新增 memory_candidate_search 按 coverage.continue_offset 续读；预算遗漏可重读同窗，排名会随并发写入变化，不保证稳定快照。上限及原文权限见 [候选远程读取](CANDIDATE-REMOTE-READING.md)。空返回须说明范围与治理口径，不等于“从未发生”。
 
-导入保存原 message id、role、created_at。source_metadata 支持 original_ref/original_date/author/locator/parser_version/parent_source_key；这些是来源说明，不是授权声明。重试使用稳定 source_key 及一致内容；相同来源键的不同内容不能假定为同一次导入。重提炼 request_key 同源、同方法、同操作保持幂等，冲突拒绝。
+导入保存原 message id、role、created_at。source_metadata 支持 original_ref/original_date/author/locator/parser_version/parent_source_key/visibility；这些是来源说明，不是授权声明。重试使用稳定 source_key 及一致内容；相同来源键的不同内容不能假定为同一次导入。重提炼 request_key 同源、同方法、同操作保持幂等，冲突拒绝。
 
 ## 已实现的原文实验入口（接口冻结）
 
@@ -64,3 +64,30 @@ python scripts/evaluate_memory_acceptance.py \
 ```
 
 当前只完成合成框架冻结与拒绝漂移/跨组泄漏等单测；真实三 baseline 与最终答案尚未运行，质量未批准。未新增实际提炼模型调用，也未恢复生产全量队列。
+
+
+## 2026-10-05 来源治理接口补充
+
+当前实现共 12 个 MCP 工具，实际部署能力仍以授权客户端的 tools/list 为准。
+新增工具不扩大普通 Agent 的授权，且不消耗模型 tokens。
+
+| 工具 | 字段 | 权限与结果 |
+| --- | --- | --- |
+| memory_source_withdrawal_preview | source_id 必填；scope=personal；max_chars=6000 | trusted_user=true 且 scope read/write；有界影响预览，不返回正文 |
+| memory_source_withdraw | source_id 必填；scope=personal；reason 最多500字符 | 同上；按 source_id 幂等撤回，保留档案/历史，停止当前检索与派生使用 |
+
+普通 inbox Token 即使能发现工具，也不能执行上述两个操作。parent_source_key 只是
+关联说明，不支持前缀或父来源批量撤回；分段须逐一核对 source ID。历史批次尚有
+处理中或未结算预算时撤回会拒绝，不能把拒绝当成成功。来源撤回不是物理删除，
+也不能抹除其他 Agent 已经消费过的上下文；客户端需刷新当前读取结果。
+
+导入回执为 id/job_id/duplicate（id 是 source ID）。同 owner、scope、principal、
+source_key 和规范化内容摘要才是重复；同键不同正文另存来源，不覆盖旧判断。
+24,000 字符按 Python Unicode codepoint 计数，使用 core.encoded 的默认 JSON 分隔空格；
+不等于 UTF-16 length、紧凑 JSON.stringify 或请求字节数。完整约束和回执账本见
+[导入参考](../skills/memory-capture/references/import.md)。
+
+传输层采用 stateless Streamable HTTP；不要求 session header，但客户端应协商协议、
+发送 initialized 并兼容部署返回的 session header。HTTP 200 仍可能包含 JSON-RPC error
+或 result.isError=true，不能仅凭状态码标记归档成功。参见
+[读取与传输契约](../skills/personal-memory-center/references/host-contract.md)。

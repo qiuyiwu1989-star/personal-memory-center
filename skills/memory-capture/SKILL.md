@@ -35,8 +35,15 @@ For payload fields, retries, and automatic lossless segmentation read
 original dates where known and explicit scope. Submit only this incremental batch;
 stop on authorization/validation errors and resolve unknown receipt before retrying.
 At a meaningful boundary inspect `memory_import_status`, avoiding repeated polling.
-Report the source/job pointers and remaining governance work, not raw private text.
+Persist the returned id (source ID), job_id and duplicate against the submitted part;
+HTTP 200 with isError is a rejection, not a receipt. Report the source/job pointers and remaining governance work, not raw private text.
 
 If a host project-memory protocol already maintains this same judgment, follow it
 and avoid duplicate writes. Do not supersede existing judgments through a fresh
 archive import; use the host's supported search/supersession workflow when authorized.
+
+
+Local deletion or source edits do not correct remote judgments. Current source-withdrawal
+MCP tools are owner-only; an inbox writer may record a withdrawal request but must not
+claim completion or impersonate owner authority. See the import reference for receipt
+reconciliation and source version boundaries.

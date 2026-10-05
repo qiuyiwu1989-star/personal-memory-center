@@ -14,7 +14,7 @@ claim that a proposed interface exists.
 Self-contained tasks or sufficient fresh conversation need zero reads. When personal
 background matters, start with `memory_context` and an explicit authorized scope,
 query and `max_chars=1600`. Only explicitly verified, currently valid records belong
-in trusted background. A successful empty result means no matching usable memory;
+in trusted background. A successful empty result with total=0 means no matching usable memory;
 it does not authorize substituting historical candidates or searching another scope.
 
 Expand for an actual evidence question: prefer the advertised
@@ -33,7 +33,7 @@ scope/access/version changes. No read operation should invoke a model.
 
 ## Import only authorized material
 
-`memory_import` accepts up to 100 messages and 24,000 serialized characters.
+`memory_import` accepts up to 100 messages and 24,000 normalized serialized Unicode codepoints (server JSON includes separator spaces).
 Preserve ids, original roles and source dates. Reuse source_key for retries;
 do not turn assistant content into user testimony. Split larger input at message
 boundaries and retain source-part linkage.
