@@ -83,6 +83,9 @@ class Store:
         setup_discovery(self)
         from .source_index_queue import setup as setup_index_queue
         setup_index_queue(self)
+        if not self.dsn:
+            from .source_lifecycle import setup as setup_lifecycle
+            setup_lifecycle(self)
         from .configuration import setup as setup_configuration
         setup_configuration(self)
 
@@ -171,6 +174,10 @@ class Store:
             if not job:
                 return False
             source = dict(db.execute('SELECT * FROM sources WHERE id=?', (job['source_id'],)).fetchone())
+            from .source_lifecycle import is_withdrawn
+            if is_withdrawn(self, db, source['id']):
+                db.execute("UPDATE jobs SET state='withdrawn',lease=NULL,lease_until=NULL,error='source_withdrawn' WHERE id=?", (job['id'],))
+                return True
             from .source_metadata import load as load_metadata
             source['source_metadata'] = load_metadata(db, source['id'])
             external = db.execute('SELECT s.reserved_attempts,s.reserved_tokens FROM bulk_segments s JOIN bulk_batches b ON b.id=s.batch_id WHERE s.job_id=? AND b.owner=? AND b.scope=?', (job['id'],source['owner'],source['scope'])).fetchone()
@@ -225,7 +232,9 @@ class Store:
             with self.db() as db:
                 db.execute('BEGIN IMMEDIATE')
                 current = db.execute('SELECT lease,state FROM jobs WHERE id=?', (job['id'],)).fetchone()
-                if current['lease'] != lease or current['state'] != 'processing':
+                if current['lease'] != lease or current['state'] != 'processing' or is_withdrawn(self, db, source['id']):
+                    if current['state'] == 'withdrawn':
+                        db.execute('UPDATE jobs SET usage=? WHERE id=?', (encoded(usage), job['id']))
                     return True
                 for c in claims:
                     # Same-source evidence is not independent corroboration; exact duplicates are ignored.
@@ -259,6 +268,7 @@ class Store:
         finally:
             with self.db() as db:
                 db.execute('BEGIN IMMEDIATE')
+                db.execute("UPDATE jobs SET usage=? WHERE id=? AND state='withdrawn'", (encoded(usage), job['id']))
                 settle(db, attempt, usage)
         return True
 
@@ -289,11 +299,14 @@ class Store:
         fields=('record_id','holder','subject_id','as_of','valid_until','state','priority','revision','note','reviewed')
         governance_columns=','.join('g.'+key+' governance_'+key for key in fields)
         with self.db() as db:
+            from .source_lifecycle import active_sql, available as lifecycle_available
+            if not history:where += active_sql(self, db)
             rows=[dict(r) for r in db.execute('SELECT r.*,s.source_key,s.source_type,t.text translated_text,'+governance_columns+
                 ' FROM records r JOIN sources s ON s.id=r.source_id LEFT JOIN record_governance g ON g.record_id=r.id '
                 "LEFT JOIN record_translations t ON t.record_id=r.id AND t.language='zh' WHERE "+where+'ORDER BY r.created DESC,r.id ASC',params)]
             jobs=[dict(r) for r in db.execute('SELECT j.*,s.source_key FROM jobs j JOIN sources s ON s.id=j.source_id '
                 'WHERE s.owner=? AND s.scope=? ORDER BY j.created DESC LIMIT 40',(principal['owner'],scope))] if include_jobs else []
+            withdrawn_sources = {r['source_id'] for r in db.execute('SELECT source_id FROM source_withdrawals WHERE owner=? AND scope=?',(principal['owner'],scope))} if lifecycle_available(self,db) else set()
             # Fetch each selected source once. Do not duplicate its payload for
             # every record or parse a multi-message source once per record.
             source_ids=list(dict.fromkeys([r['source_id'] for r in rows]+[j['source_id'] for j in jobs]))
@@ -313,7 +326,8 @@ class Store:
             row['translated']=translated is not None
             governed={key:row.pop('governance_'+key) for key in fields}
             row['governance']=metadata(row,governed if governed['record_id'] is not None else None)
-            row['usable']=usable(row)
+            row['source_withdrawn']=row['source_id'] in withdrawn_sources
+            row['usable']=not row['source_withdrawn'] and usable(row)
             messages,first,usage=source_context[row['source_id']]
             evidence=messages.get(row['message_id'],{})
             row['source_title']=evidence.get('source_title',row['source_key'])
@@ -354,6 +368,7 @@ class Store:
         if type(offset) is not int or not 0<=offset<=10000 or type(window_limit) is not int or not 1<=window_limit<=128:
             raise Invalid('候选排名窗口无效')
         from . import reading
+        from .source_lifecycle import active_sql
         def coverage(mode,examined,total):
             end=offset+examined;more=end<total
             result={'mode':mode,'offset':offset,'examined':examined,
@@ -377,7 +392,7 @@ class Store:
                 "LEFT JOIN record_governance g ON g.record_id=r.id "
                 "LEFT JOIN record_translations t ON t.record_id=r.id AND t.language='zh' "
                 "WHERE r.owner=? AND r.scope=? AND r.lifecycle='active' "
-                "AND COALESCE(g.state,'candidate')='candidate' ORDER BY r.created DESC,r.id ASC",
+                "AND COALESCE(g.state,'candidate')='candidate' " + active_sql(self, db) + "ORDER BY r.created DESC,r.id ASC",
                 (principal['owner'],scope))
             for index,raw in enumerate(rows):
                 if query_present:

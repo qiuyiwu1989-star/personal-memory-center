@@ -230,7 +230,8 @@ class Bulk:
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
                 batch=db.execute('SELECT state,tokens_spent,token_limit,scope FROM bulk_batches WHERE id=? AND owner=?',(batch_id,principal['owner'])).fetchone()
-                candidate=db.execute("SELECT s.job_id,s.attempts_counted FROM bulk_segments s JOIN jobs j ON j.id=s.job_id WHERE s.batch_id=? AND s.state='failed' AND j.state='failed' ORDER BY s.created LIMIT 1",(batch_id,)).fetchone()
+                from .source_lifecycle import active_sql
+                candidate=db.execute("SELECT s.job_id,s.attempts_counted FROM bulk_segments s JOIN jobs j ON j.id=s.job_id WHERE s.batch_id=? AND s.state='failed' AND j.state='failed' "+active_sql(self.store,db,'j.source_id')+"ORDER BY s.created LIMIT 1",(batch_id,)).fetchone()
                 if not batch or not candidate:raise Invalid('没有可重试的失败任务')
                 from .configuration import extra_reservation
                 reservation=RESERVE_TOKENS+extra_reservation(db,principal['owner'],batch['scope'])

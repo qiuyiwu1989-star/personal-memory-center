@@ -207,6 +207,31 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
                       request.args.get('max_chars',6000,type=int),request.args.get('retrieval_mode','lexical-v1'))
         return Response(encoded(result),mimetype='application/json')
 
+    @bp.get('/sources/<source_id>/ledger')
+    def source_governance_ledger(source_id):
+        from .source_ledger import source_ledger
+        return jsonify(source_ledger(store,g.memory_principal,request.args.get('scope','personal'),source_id,
+                                     request.args.get('limit',20),request.args.get('offset',0)))
+
+    @bp.get('/records/<record_id>/ledger')
+    def record_governance_ledger(record_id):
+        from .source_ledger import record_ledger
+        return jsonify(record_ledger(store,g.memory_principal,request.args.get('scope','personal'),record_id,
+                                     request.args.get('limit',20),request.args.get('offset',0)))
+
+    @bp.get('/sources/<source_id>/withdrawal-preview')
+    def source_withdrawal_preview(source_id):
+        from .source_lifecycle import preview
+        return jsonify(preview(store,g.memory_principal,request.args.get('scope','personal'),source_id,
+                               request.args.get('max_chars',6000,type=int)))
+
+    @bp.post('/sources/<source_id>/withdraw')
+    def source_withdrawal(source_id):
+        from .source_lifecycle import withdraw
+        data=body()
+        if set(data)-{'scope','reason'}: raise Invalid('撤回字段无效')
+        return jsonify(withdraw(store,g.memory_principal,data.get('scope','personal'),source_id,data.get('reason','')))
+
     @bp.get('/sources/<source_id>/dependencies')
     def source_dependencies(source_id):
         from .dependency_audit import preview

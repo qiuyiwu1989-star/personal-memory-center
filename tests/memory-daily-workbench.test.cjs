@@ -2,7 +2,7 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
 const {webcrypto}=require('node:crypto');
 class Element {
-  constructor(tag='div'){this.tagName=tag;this.children=[];this.listeners={};this.dataset={};this.attrs={};this.value='';this.hidden=false;this.selectedOptions=[{textContent:'Synthetic scope'}];this.classList={add(){},remove(){}};}
+  constructor(tag='div'){this.tagName=tag;this.children=[];this.listeners={};this.dataset={};this.attrs={};this.style={};this.value='';this.hidden=false;this.selectedOptions=[{textContent:'Synthetic scope'}];this.classList={add(){},remove(){}};}
   append(...items){this.children.push(...items);} prepend(...items){this.children.unshift(...items);} before(){} after(){}
   replaceChildren(...items){this.children=items;} setAttribute(k,v){this.attrs[k]=v;}
   addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);}
@@ -22,7 +22,7 @@ function setup({overview={},budget={},transport}={}){
       calls.push({url,body:JSON.parse(options.body)});return {ok:false,json:async()=>({error:'Synthetic rejection'})};
     }};
   let script=fs.readFileSync(require.resolve('../assets/memory-center.js'),'utf8');
-  script=script.replace(/  connect\(\);\n\}\)\(\);\s*$/, '  window.testUI={refresh,refreshOverview,refreshBudget,setIdentity:p=>identity=p};\n})();');
+  script=script.replace(/  connect\(\);\n\}\)\(\);\s*$/, '  window.testUI={refresh,refreshOverview,refreshBudget,openLedger,setIdentity:p=>identity=p};\n})();');
   vm.runInNewContext(script,context);return {$,calls,gets,ui:window.testUI};
 }
 function find(root,predicate){if(predicate(root))return root;for(const child of root.children){const result=find(child,predicate);if(result)return result;}}
@@ -52,4 +52,37 @@ test('scope switch during an active refresh schedules fresh scope instead of dro
   const {$,ui,gets}=setup({transport:async(url,responses)=>{if(url.includes('/records?')&&first){first=false;await gate;}return responses[new URL(url,'http://synthetic').pathname.split('/').pop()];}});ui.setIdentity(identity);
   $('scope').value='claude:history-synthetic';const active=ui.refresh();$('scope').value='personal';await ui.refresh();release();await active;await flush();
   assert.ok(gets.some(url=>url.includes('/records?scope=personal')));assert.equal($('count').textContent,'0');assert.equal($('notice').dataset.error,undefined);
+});
+
+test('governance ledger does not render a stale reply after scope changes',async()=>{
+  let release;const wait=new Promise(resolve=>release=resolve);
+  const {$,ui}=setup({transport:async(url,responses)=>url.includes('/ledger?')?wait:responses[new URL(url,'http://synthetic').pathname.split('/').pop()]});
+  ui.setIdentity(identity);const pending=ui.openLedger('sources','synthetic-source','personal');
+  $('scope').value='claude:history-synthetic';release({source:{title:'Stale source'},summary:{},records:[]});await pending;
+  assert.equal($('document-reader').open,undefined);assert.equal($('reader-body').children.length,0);
+});
+test('governance ledger renders untrusted statements as text and unknown costs explicitly',async()=>{
+  const {$,ui}=setup({transport:async()=>({source:{id:'synthetic-source'},summary:{records_total:1},records:[{id:'synthetic-record',statement:'<img src=x onerror=bad()>',usable:false}],jobs:[],documents:[]})});
+  ui.setIdentity(identity);await ui.openLedger('sources','synthetic-source','personal');
+  const text=find($('reader-body'),e=>e.textContent==='<img src=x onerror=bad()>');assert.ok(text);assert.equal(text.tagName,'p');
+  assert.ok(find($('reader-body'),e=>e.textContent?.includes('费用记为未知')));assert.equal($('document-reader').open,true);
+});
+test('closing the reader prevents a delayed ledger reply reopening it',async()=>{
+  let release;const wait=new Promise(resolve=>release=resolve);const {$,ui}=setup({transport:async()=>wait});ui.setIdentity(identity);
+  const pending=ui.openLedger('sources','synthetic-source','personal');await $('reader-close').emit('click');release({summary:{},records:[]});await pending;
+  assert.equal($('document-reader').open,false);
+});
+test('source withdrawal requires explicit checked consent after impact preview',async()=>{
+  const payload={source:{id:'synthetic-source',scope:'personal'},summary:{},records:[],jobs:[],documents:[]};
+  const {$,ui,calls}=setup({transport:async url=>url.includes('withdrawal-preview')?{withdrawal_supported:true,counts:{records:1,jobs:1,document_versions:0}}:payload});
+  ui.setIdentity(identity);await ui.openLedger('sources','synthetic-source','personal');
+  assert.equal(calls.length,0);const preview=find($('reader-body'),e=>e.textContent==='查看来源撤回影响');await preview.emit('click');
+  const form=find($('reader-body'),e=>e.tagName==='form');assert.ok(form,$('notice').textContent);await form.emit('submit');assert.equal(calls.length,0);
+  const check=find(form,e=>e.type==='checkbox');check.checked=true;await form.emit('submit');
+  assert.equal(calls.length,1);assert.ok(calls[0].url.endsWith('/sources/synthetic-source/withdraw'));assert.equal(calls[0].body.scope,'personal');
+});
+test('agent read grant cannot expose the owner source withdrawal control',async()=>{
+  const {$,ui}=setup({transport:async()=>({source:{id:'synthetic-source'},summary:{},records:[],jobs:[],documents:[]})});
+  ui.setIdentity({...identity,can_correct:false});await ui.openLedger('sources','synthetic-source','personal');
+  assert.equal(find($('reader-body'),e=>e.textContent==='查看来源撤回影响'),undefined);
 });

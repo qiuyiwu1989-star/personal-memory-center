@@ -107,6 +107,9 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
             row=db.execute('SELECT * FROM sources WHERE id=? AND owner=?',(source_id,p['owner'])).fetchone()
         if not row:raise ValueError('Source not found')
         permit(p,row['scope'],'source_read')
+        from .source_lifecycle import is_withdrawn
+        with store.db() as db:
+            if is_withdrawn(store,db,source_id):raise ValueError('Source withdrawn; use owner workbench audit history')
         for message in json.loads(row['payload']):
             if message['id']==message_id:
                 from .reading import source_page
@@ -151,6 +154,18 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
         permit(p,row['scope'],'read')
         from .source_index_queue import status as index_status
         return dict(row) | {'index_status':index_status(store,p,row['scope'])}
+
+    @mcp.tool()
+    def memory_source_withdrawal_preview(source_id:str,ctx:Context,scope:str='personal',max_chars:int=6000)->dict:
+        """Owner-only bounded source withdrawal impact, no content or model calls."""
+        from .source_lifecycle import preview
+        return preview(store,principal(ctx),scope,source_id,max_chars)
+
+    @mcp.tool()
+    def memory_source_withdraw(source_id:str,ctx:Context,scope:str='personal',reason:str='')->dict:
+        """Owner-only idempotent source withdrawal; archive and history retained."""
+        from .source_lifecycle import withdraw
+        return withdraw(store,principal(ctx),scope,source_id,reason)
 
     mcp_app=mcp.streamable_http_app()
     @contextlib.asynccontextmanager

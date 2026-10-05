@@ -58,7 +58,7 @@ class ConfigurationTest(unittest.TestCase):
         vid=self.make('skill',{'name':'memory-capture','version':'synthetic-v1','instructions':'合成 Skill 草稿'})
         with self.assertRaises(Invalid):self.enable(vid)
         manifest=listing(self.store,self.owner,'personal')['integration']
-        self.assertEqual(len(manifest['tools']),10)
+        self.assertTrue({'memory_context','memory_import','memory_source_withdrawal_preview','memory_source_withdraw'}.issubset(set(manifest['tools'])))
         self.assertEqual(len(manifest['skills']),2)
     def test_prompt_budget_reserves_utf8_and_empty_is_baseline(self):
         vid=self.make(payload={'instructions':'中文补充'})
