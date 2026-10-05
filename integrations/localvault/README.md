@@ -76,3 +76,10 @@ to any other origin. All credentials and documents are synthetic.
 This is code compatibility evidence, not acceptance of the user's real
 LocalVault instance, its grants or document quality. Source withdrawal
 synchronization remains a separate integration task.
+
+## Product and memory-node planning
+
+See [LocalVault 与记忆中心：统一规范与双向协作建议](MEMORY-NODE-PLAN-2026-10-05.md)
+for the proposed independent local-memory product, shared governance rules,
+versioned exchange, permissions and development sequence. These proposed
+candidate/event/delta capabilities are not part of the current archive MCP.
