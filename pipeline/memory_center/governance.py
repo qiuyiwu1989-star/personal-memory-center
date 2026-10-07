@@ -76,7 +76,7 @@ def usable(row, today=None):
     Read validation fails closed without repairing or rewriting stored metadata.
     """
     g = row.get('governance') or {}
-    if row.get('lifecycle') != 'active' or g.get('state') != 'verified':
+    if row.get('source_withdrawn') or row.get('lifecycle') != 'active' or g.get('state') != 'verified':
         return False
     try:
         values = normalize({key: g[key] for key in (

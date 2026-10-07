@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import time
+from .source_lifecycle import active_sql
 from .core import Invalid, encoded, permit
 from .retrieval_ranking import score_record_v3
 
@@ -126,7 +127,7 @@ def rebuild(store, principal, scope, force=False):
     with store.db() as db:
         db.execute('BEGIN IMMEDIATE')
         sources = [dict(row) for row in db.execute(
-            'SELECT s.*,e.metadata parser_metadata FROM sources s LEFT JOIN source_envelopes e ON e.source_id=s.id WHERE s.owner=? AND s.scope=? ORDER BY s.created,s.id', (principal['owner'], scope))]
+            'SELECT s.*,e.metadata parser_metadata FROM sources s LEFT JOIN source_envelopes e ON e.source_id=s.id WHERE s.owner=? AND s.scope=? '+active_sql(store,db)+'ORDER BY s.created,s.id', (principal['owner'], scope))]
         counts['skipped_legacy_sources'] = sum(not _eligible(source) for source in sources)
         sources = [source for source in sources if _eligible(source)]
         versions = {row['source_id']: dict(row) for row in db.execute(
@@ -187,7 +188,7 @@ def search(store, principal, scope, query, max_chars=6000, offset=0, limit=20):
             'SELECT c.*,v.payload_digest FROM source_discovery_chunks c JOIN sources s ON s.id=c.source_id '
             'JOIN source_discovery_versions v ON v.source_id=c.source_id '
             'WHERE c.owner=? AND c.scope=? AND s.owner=? AND s.scope=? AND s.digest=c.source_digest '
-            'AND v.index_version=? ORDER BY s.created DESC,c.source_id,c.message_index,c.start_char',
+            'AND v.index_version=? '+active_sql(store,db)+'ORDER BY s.created DESC,c.source_id,c.message_index,c.start_char',
             (principal['owner'], scope, principal['owner'], scope, INDEX_VERSION))]
     scored = []
     for row in rows:
@@ -227,7 +228,7 @@ def read(store, principal, scope, locator, offset=0, max_chars=4000):
     with store.db() as db:
         row = db.execute('SELECT c.*,s.payload,s.source_type,s.principal,s.source_key current_source_key,e.metadata parser_metadata,v.payload_digest FROM source_discovery_chunks c '
                          'JOIN sources s ON s.id=c.source_id JOIN source_discovery_versions v ON v.source_id=c.source_id LEFT JOIN source_envelopes e ON e.source_id=s.id '
-                         'WHERE c.id=? AND c.owner=? AND c.scope=? AND s.owner=? AND s.scope=? AND s.digest=c.source_digest AND v.index_version=?',
+                         'WHERE c.id=? AND c.owner=? AND c.scope=? AND s.owner=? AND s.scope=? AND s.digest=c.source_digest AND v.index_version=? '+active_sql(store,db),
                          (locator['chunk_id'],principal['owner'],scope,principal['owner'],scope,INDEX_VERSION)).fetchone()
     if not row:
         raise Invalid('原文 locator 不存在或版本已变化')

@@ -83,6 +83,13 @@ class Store:
         setup_discovery(self)
         from .source_index_queue import setup as setup_index_queue
         setup_index_queue(self)
+        if not self.dsn:
+            from .source_lifecycle import setup as setup_lifecycle
+            setup_lifecycle(self)
+            from .candidate_intake import setup as setup_candidate_intake
+            setup_candidate_intake(self)
+        from .configuration import setup as setup_configuration
+        setup_configuration(self)
 
     @contextmanager
     def db(self):
@@ -169,6 +176,10 @@ class Store:
             if not job:
                 return False
             source = dict(db.execute('SELECT * FROM sources WHERE id=?', (job['source_id'],)).fetchone())
+            from .source_lifecycle import is_withdrawn
+            if is_withdrawn(self, db, source['id']):
+                db.execute("UPDATE jobs SET state='withdrawn',lease=NULL,lease_until=NULL,error='source_withdrawn' WHERE id=?", (job['id'],))
+                return True
             from .source_metadata import load as load_metadata
             source['source_metadata'] = load_metadata(db, source['id'])
             external = db.execute('SELECT s.reserved_attempts,s.reserved_tokens FROM bulk_segments s JOIN bulk_batches b ON b.id=s.batch_id WHERE s.job_id=? AND b.owner=? AND b.scope=?', (job['id'],source['owner'],source['scope'])).fetchone()
@@ -223,7 +234,9 @@ class Store:
             with self.db() as db:
                 db.execute('BEGIN IMMEDIATE')
                 current = db.execute('SELECT lease,state FROM jobs WHERE id=?', (job['id'],)).fetchone()
-                if current['lease'] != lease or current['state'] != 'processing':
+                if current['lease'] != lease or current['state'] != 'processing' or is_withdrawn(self, db, source['id']):
+                    if current['state'] == 'withdrawn':
+                        db.execute('UPDATE jobs SET usage=? WHERE id=?', (encoded(usage), job['id']))
                     return True
                 for c in claims:
                     # Same-source evidence is not independent corroboration; exact duplicates are ignored.
@@ -257,6 +270,7 @@ class Store:
         finally:
             with self.db() as db:
                 db.execute('BEGIN IMMEDIATE')
+                db.execute("UPDATE jobs SET usage=? WHERE id=? AND state='withdrawn'", (encoded(usage), job['id']))
                 settle(db, attempt, usage)
         return True
 
@@ -287,11 +301,18 @@ class Store:
         fields=('record_id','holder','subject_id','as_of','valid_until','state','priority','revision','note','reviewed')
         governance_columns=','.join('g.'+key+' governance_'+key for key in fields)
         with self.db() as db:
-            rows=[dict(r) for r in db.execute('SELECT r.*,s.source_key,s.source_type,t.text translated_text,'+governance_columns+
+            from .source_lifecycle import active_sql, available as lifecycle_available
+            from .candidate_intake import available as intake_available
+            intake_ready=intake_available(self,db)
+            intake_column=',ci.record_id intake_record_id' if intake_ready else ',NULL intake_record_id'
+            intake_join='LEFT JOIN candidate_intake_evidence ci ON ci.record_id=r.id ' if intake_ready else ''
+            if not history:where += active_sql(self, db)
+            rows=[dict(r) for r in db.execute('SELECT r.*,s.source_key,s.source_type,t.text translated_text,'+governance_columns+intake_column+
                 ' FROM records r JOIN sources s ON s.id=r.source_id LEFT JOIN record_governance g ON g.record_id=r.id '
-                "LEFT JOIN record_translations t ON t.record_id=r.id AND t.language='zh' WHERE "+where+'ORDER BY r.created DESC,r.id ASC',params)]
+                "LEFT JOIN record_translations t ON t.record_id=r.id AND t.language='zh' "+intake_join+'WHERE '+where+'ORDER BY r.created DESC,r.id ASC',params)]
             jobs=[dict(r) for r in db.execute('SELECT j.*,s.source_key FROM jobs j JOIN sources s ON s.id=j.source_id '
                 'WHERE s.owner=? AND s.scope=? ORDER BY j.created DESC LIMIT 40',(principal['owner'],scope))] if include_jobs else []
+            withdrawn_sources = {r['source_id'] for r in db.execute('SELECT source_id FROM source_withdrawals WHERE owner=? AND scope=?',(principal['owner'],scope))} if lifecycle_available(self,db) else set()
             # Fetch each selected source once. Do not duplicate its payload for
             # every record or parse a multi-message source once per record.
             source_ids=list(dict.fromkeys([r['source_id'] for r in rows]+[j['source_id'] for j in jobs]))
@@ -311,7 +332,8 @@ class Store:
             row['translated']=translated is not None
             governed={key:row.pop('governance_'+key) for key in fields}
             row['governance']=metadata(row,governed if governed['record_id'] is not None else None)
-            row['usable']=usable(row)
+            row['source_withdrawn']=row['source_id'] in withdrawn_sources
+            row['usable']=not row['source_withdrawn'] and usable(row)
             messages,first,usage=source_context[row['source_id']]
             evidence=messages.get(row['message_id'],{})
             row['source_title']=evidence.get('source_title',row['source_key'])
@@ -320,7 +342,8 @@ class Store:
             row['modality']=evidence_modality(row['quote'])
             row['review_note']=(usage.get('review_notes') or {}).get(row['statement'])
             row['quality_note']=(usage.get('quality_review_notes') or {}).get(row['statement'])
-            row['processing_method']=usage.get('method','llm' if row['message_id']!='correction' else 'owner_correction')
+            intake_record=row.pop('intake_record_id')
+            row['processing_method']='upstream_candidate' if intake_record else usage.get('method','llm' if row['message_id']!='correction' else 'owner_correction')
         from .retrieval_ranking import search_records
         rows=search_records(rows,query,retrieval_mode)
         if governance_filter:
@@ -352,6 +375,7 @@ class Store:
         if type(offset) is not int or not 0<=offset<=10000 or type(window_limit) is not int or not 1<=window_limit<=128:
             raise Invalid('候选排名窗口无效')
         from . import reading
+        from .source_lifecycle import active_sql
         def coverage(mode,examined,total):
             end=offset+examined;more=end<total
             result={'mode':mode,'offset':offset,'examined':examined,
@@ -375,7 +399,7 @@ class Store:
                 "LEFT JOIN record_governance g ON g.record_id=r.id "
                 "LEFT JOIN record_translations t ON t.record_id=r.id AND t.language='zh' "
                 "WHERE r.owner=? AND r.scope=? AND r.lifecycle='active' "
-                "AND COALESCE(g.state,'candidate')='candidate' ORDER BY r.created DESC,r.id ASC",
+                "AND COALESCE(g.state,'candidate')='candidate' " + active_sql(self, db) + "ORDER BY r.created DESC,r.id ASC",
                 (principal['owner'],scope))
             for index,raw in enumerate(rows):
                 if query_present:
@@ -546,10 +570,10 @@ def validate_plan(plan, source):
         elif message['role'] == 'user' and source['trusted_user']:
             status = 'user_stated'
         from .claim_context import evidence_context, contains_immediate_command, statement_has_date
-        if source.get('processing_method_version') in ('2026-10-01.6','2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17','2026-10-03.18','2026-10-03.19','2026-10-03.20','2026-10-03.21'):
+        if source.get('processing_method_version') in ('2026-10-01.6','2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17','2026-10-03.18','2026-10-03.19','2026-10-03.20','2026-10-03.21','2026-10-04.22'):
             context = evidence_context(message,source['source_type'])
             semantic_statement = c['statement']
-            if source.get('processing_method_version') in ('2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17','2026-10-03.18','2026-10-03.19','2026-10-03.20','2026-10-03.21') and source['source_type']!='imported_summary':
+            if source.get('processing_method_version') in ('2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17','2026-10-03.18','2026-10-03.19','2026-10-03.20','2026-10-03.21','2026-10-04.22') and source['source_type']!='imported_summary':
                 prefix = ('来源消息日期：'+context['source_date']+'（非事件成立时间，当前有效性待核实）。') if context['source_date'] else ''
                 if c['topic']=='projects' and context['conversation_title']:
                     prefix += '来源对话：'+context['conversation_title']+'。'
@@ -566,17 +590,17 @@ def validate_plan(plan, source):
                     raise Invalid('历史陈述必须保留来源日期，不能把历史要求当成当前状态')
                 if c['topic']=='projects' and context['conversation_title'] and context['conversation_title'] not in c['statement']:
                     raise Invalid('项目陈述必须保留来源对话标题，不能猜测项目身份或使用模糊指代')
-            elif source.get('processing_method_version') in ('2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17','2026-10-03.18','2026-10-03.19','2026-10-03.20','2026-10-03.21') and '原始时间未知' not in c['statement']:
+            elif source.get('processing_method_version') in ('2026-10-01.7','2026-10-01.8','2026-10-01.9','2026-10-01.10','2026-10-01.11','2026-10-01.12','2026-10-01.13','2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17','2026-10-03.18','2026-10-03.19','2026-10-03.20','2026-10-03.21','2026-10-04.22') and '原始时间未知' not in c['statement']:
                 raise Invalid('摘要更新时间不能充当事件时间，请明确原始时间未知')
             elif not c['statement'].startswith(('摘要记载','摘要主张')):
                 raise Invalid('二手摘要必须明确归属，不能升格为本人陈述')
         from .modality import evidence_modality, modality_problem
         mode = evidence_modality(c['quote'])
-        if source.get('processing_method_version') in ('2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17','2026-10-03.18','2026-10-03.19','2026-10-03.20','2026-10-03.21'):
+        if source.get('processing_method_version') in ('2026-10-01.14','2026-10-02.15','2026-10-02.16','2026-10-03.17','2026-10-03.18','2026-10-03.19','2026-10-03.20','2026-10-03.21','2026-10-04.22'):
             problem = modality_problem(c['quote'], semantic_statement, c['kind'])
             if problem:
                 raise Invalid(problem)
-        if source.get('processing_method_version') == '2026-10-03.21':
+        if source.get('processing_method_version') in ('2026-10-03.21','2026-10-04.22'):
             from .qualifications import qualification_problem
             problem = qualification_problem(c['quote'], semantic_statement, c['kind'])
             if problem: raise Invalid(problem)

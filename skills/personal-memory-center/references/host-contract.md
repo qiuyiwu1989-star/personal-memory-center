@@ -25,7 +25,9 @@ are separate authorized writes with their existing budget/quality gates.
 
 ## Capability and continuation
 
-Current server adds `memory_candidate_search` to the prior tools. Probe the actual
+The development server also implements `memory_capabilities`, `memory_changes` and
+`memory_candidate_submit`; deployed servers may lag. It includes `memory_candidate_search`
+and two owner-only source-withdrawal tools. Probe the actual
 `tools/list` schema for query/scope strings, max_chars/offset/window_limit integers and
 retrieval_mode string. Only query is required by the current interface. Do not infer a
 capability from a fixed tool count. If absent or incompatible, report the window feature
@@ -51,7 +53,7 @@ documents. Legacy `memory_search` has no offset API.
 
 ## Empty, unavailable and denied are different
 
-- Successful empty `memory_context`: no matching currently usable verified background;
+- Successful empty `memory_context` with total=0: no matching currently usable verified background;
   explain the gap without auto-promoting candidates. An evidence investigation may still
   explicitly search candidates in the same authorized scope.
 - Missing/incompatible tool schema: capability unavailable; explain supported compatibility
@@ -74,3 +76,67 @@ Source roles/dates/index versions do not establish identity or validity. Duplica
 and candidate representations are the same source, not independent corroboration. Owner
 text corrections remain candidates until explicit governance review; only verified records
 passing completeness and validity checks enter trusted context.
+
+
+## Transport and result handling
+
+Current service uses stateless Streamable HTTP with JSON responses, so it does not
+require Mcp-Session-Id. Still initialize, accept the negotiated supported protocol,
+send notifications/initialized and discover tools. If another compatible deployment
+returns a session header, retain it on subsequent calls. Capability/permission failures
+must not trigger scope changes. Do not assume a session or protocol from a stale export.
+
+Distinguish HTTP/network, JSON-RPC error, tool result isError, and job state. An MCP
+permission/validation failure can be HTTP 200 with result.isError=true; HTTP success
+alone is not a successful import/read. Never turn a denied or malformed result into
+records=[]. Prefer structuredContent, otherwise decode JSON TextContent. Safe diagnostic
+reports contain phase/status/error type and pointers, not bearer values or private text.
+Stable machine-readable service error codes are not yet guaranteed across all layers.
+
+For context, records=[] with total>0 or truncated=true can mean the budget omitted
+whole eligible items; narrow the task query or increase an authorized character budget.
+It does not establish that the personal memory scope is empty. context_revision detects
+changes to eligible results but does not erase already-consumed external agent prompts.
+Refresh before reuse and discard held context when authorization/version changes.
+
+Owner-only memory_source_withdrawal_preview and memory_source_withdraw require
+trusted_user=true plus scope read/write. Their presence in tools/list never grants
+that authority to an inbox writer. Ordinary agents submit proposed corrections as
+attributed new evidence and ask the owner to review; they do not silently supersede
+or withdraw sources. A source withdrawal hides it and its dependent current projections,
+retains historical bytes, and preserves independent sources. Source groups, physical
+erasure and restoration are not implied by these two tools.
+
+## Changed context and checkpoints (optional advertised interface)
+
+On first connection or changed deployment/credential, `memory_capabilities(scope)`
+describes this grant's ready/authorized features and required migrations. It is
+read-only, not permission to write. For trusted context use `memory_context` or
+REST `GET /task-context`; legacy REST `POST /context` returns candidate evidence.
+MCP imports default to archive; older REST `/sources` may default to extract for
+non-archive-only grants. Always send an explicit archive policy when capturing.
+
+Use `memory_changes(scope,cursor,max_chars=4000,limit=50)` only when reusing held
+context or checking a known correction. It returns a bounded manifest of current
+record metadata: revisions, governance state, supersession, source withdrawal and
+valid dates. It reads no source bodies and calls no model. Server work is an O(N)
+metadata scan, so avoid frequent polling or treating it as a free full sync.
+
+- First call omits cursor; follow `next_cursor` only to complete a needed manifest.
+  Save `checkpoint` after the final page, scoped to authenticated owner/client/scope.
+- On reuse, pass that checkpoint. `changed=false` returns no items. When true,
+  discard held context and fetch `memory_context` with the current task query.
+  Metadata is not trusted text and must never patch personal facts into a prompt.
+- A stale continuation raises a conflict. Invalidate the cache and restart without
+  a cursor; do not skip a page or convert the error into an empty success.
+- This is **not** an event delta, historical replay, source/COS synchronization,
+  push notification or proof that other agents erased old prompts. New archives,
+  documents and configuration changes are outside its coverage.
+- The recommended revalidation interval is 300 seconds when actively reusing
+  held data, not an instruction to run a background poller. Date transitions
+  invalidate the checkpoint. Recheck access on every call, clear cached context
+  on denial, and refresh before starting another task.
+
+The development REST history list (`GET /records?history=1`) and single-record
+audit detail are owner-only with source-read access. Agents use current bounded
+interfaces; they cannot recover withdrawn text through the owner's audit view.

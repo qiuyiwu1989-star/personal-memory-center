@@ -146,6 +146,9 @@ def build_documents(store, principal, scope, query=''):
             'records':dict(db.execute('SELECT count(*) n,max(created) latest,sum(revision) revisions FROM records WHERE owner=? AND scope=?',(principal['owner'],scope)).fetchone()),
             'governance':dict(db.execute('SELECT count(*) n,max(g.reviewed) latest,sum(g.revision) revisions FROM record_governance g JOIN records r ON r.id=g.record_id WHERE r.owner=? AND r.scope=?',(principal['owner'],scope)).fetchone()),
             'translations':dict(db.execute('SELECT count(*) n,max(t.reviewed) latest FROM record_translations t JOIN records r ON r.id=t.record_id WHERE r.owner=? AND r.scope=?',(principal['owner'],scope)).fetchone())})
+        from .source_lifecycle import available as lifecycle_available
+        if lifecycle_available(store, db):
+            signature += encoded(dict(db.execute('SELECT count(*) n,max(created) latest FROM source_withdrawals WHERE owner=? AND scope=?',(principal['owner'],scope)).fetchone()))
         from .temporal import available, acknowledge
         if available(store,db):
             row=db.execute('SELECT generation,refreshed_generation FROM scope_projection_state WHERE owner=? AND scope=?',(principal['owner'],scope)).fetchone()
@@ -155,7 +158,7 @@ def build_documents(store, principal, scope, query=''):
             intact=all(Path(d['export_path']).exists() and Path(d['export_path']).stat().st_mtime_ns==stamp for d,stamp in cache[1])
             if intact:
                 return [dict(d) for d,_ in cache[1] if not query.strip() or query.casefold() in (d['title']+'\n'+d['markdown']).casefold()]
-        rows=store.snapshot(principal,scope,history=True,limit=1000000)['records']
+        rows=[r for r in store.snapshot(principal,scope,history=True,limit=1000000)['records'] if not r.get('source_withdrawn')]
         expanded=[]
         for raw_topic in topics:
             topic=dict(raw_topic)

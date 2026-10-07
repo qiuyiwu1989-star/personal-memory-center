@@ -5,6 +5,7 @@ and budget extraction. Matching a quote does not verify the resulting statement.
 """
 import json
 import time
+from .source_lifecycle import is_withdrawn
 from .core import Invalid, permit, permit_model, validate_plan, uid, encoded
 
 SCHEMA = '''
@@ -21,7 +22,7 @@ def preview(store, principal, source_id, plan, method_version):
         db.executescript(SCHEMA)
         db.execute('BEGIN IMMEDIATE')
         source=db.execute('SELECT * FROM sources WHERE id=? AND owner=?',(source_id,principal['owner'])).fetchone()
-        if not source:raise Invalid('来源不存在')
+        if not source or is_withdrawn(store,db,source_id):raise Invalid('来源不存在或已撤回')
         permit(principal,source['scope'],'read');permit(principal,source['scope'],'write')
         source=dict(source)
         source['processing_method_version']=method_version
@@ -80,7 +81,7 @@ def enqueue(store,principal,source_id,request_key,operation='reextract',record_i
     with store.db() as db:
         db.execute('BEGIN IMMEDIATE')
         source=db.execute('SELECT * FROM sources WHERE id=? AND owner=?',(source_id,principal['owner'])).fetchone()
-        if not source:raise Invalid('来源不存在')
+        if not source or is_withdrawn(store,db,source_id):raise Invalid('来源不存在或已撤回')
         permit(principal,source['scope'],'read');permit(principal,source['scope'],'write')
         permit_model(principal, source['scope'])
         if operation=='translate':
@@ -117,10 +118,11 @@ def listing(store,principal,scope,source_id=None):
 
 def get_preview(store,principal,preview_id):
     with store.db() as db:
-        row=db.execute('SELECT p.comparison,s.scope FROM extraction_previews p JOIN sources s ON s.id=p.source_id WHERE p.id=? AND s.owner=?',
+        row=db.execute('SELECT p.comparison,s.scope,s.id source_id FROM extraction_previews p JOIN sources s ON s.id=p.source_id WHERE p.id=? AND s.owner=?',
                        (preview_id,principal['owner'])).fetchone()
-    if not row:raise Invalid('差异不存在')
-    permit(principal,row['scope'],'read')
+        if not row:raise Invalid('差异不存在')
+        permit(principal,row['scope'],'read')
+        if is_withdrawn(store,db,row['source_id']):raise Invalid('来源已撤回，差异仅保留审计历史')
     return json.loads(row['comparison'])
 
 
@@ -135,8 +137,10 @@ def process_one(store,model):
         run=db.execute("SELECT * FROM extraction_runs WHERE state='received' ORDER BY created LIMIT 1").fetchone()
         if not run:return False
         run=dict(run)
-        if run['method_version']!=PROMPT_VERSION:
+        if run['method_version']!=getattr(model,'method_version',PROMPT_VERSION):
             db.execute("UPDATE extraction_runs SET state='failed',error='method_version_changed' WHERE id=?",(run['id'],));return True
+        if is_withdrawn(store,db,run['source_id']):
+            db.execute("UPDATE extraction_runs SET state='withdrawn',lease=NULL,lease_until=NULL,error='source_withdrawn' WHERE id=?",(run['id'],));return True
         source=dict(db.execute('SELECT * FROM sources WHERE id=?',(run['source_id'],)).fetchone())
         from .source_metadata import load as load_metadata
         source['source_metadata']=load_metadata(db,source['id'])
@@ -157,7 +161,7 @@ def process_one(store,model):
     usage=None
     try:
         if operation['operation']=='translate':
-            translated,usage=model.translate(target['statement'])
+            translated,usage=model.translate_source(source,target['statement']) if hasattr(model,'translate_source') else model.translate(target['statement'])
             if not isinstance(translated,str) or not 1<=len(translated)<=2000:raise Invalid('翻译输出无效')
             comparison={'id':uid(),'source_id':source['id'],'method_version':'zh-projection-v1','operation':'translate','semantic_verified':False,
                         'changes':[{'comparison':'translation','candidate':{'record_id':target['id'],'original':target['statement'],'text':translated}}]}
@@ -177,7 +181,9 @@ def process_one(store,model):
             db.execute("UPDATE extraction_runs SET state='failed',error=?,usage=?,lease=NULL WHERE id=? AND lease=?",(error[:160],encoded(usage),run['id'],lease))
     finally:
         with store.db() as db:
-            db.execute('BEGIN IMMEDIATE');settle(db,attempt,usage)
+            db.execute('BEGIN IMMEDIATE')
+            db.execute("UPDATE extraction_runs SET usage=? WHERE id=? AND state='withdrawn'",(encoded(usage),run['id']))
+            settle(db,attempt,usage)
     return True
 
 
@@ -190,6 +196,7 @@ def control(store,principal,run_id,action,indices=None):
         run=db.execute('SELECT * FROM extraction_runs WHERE id=? AND owner=?',(run_id,principal['owner'])).fetchone()
         if not run:raise Invalid('任务不存在')
         permit(principal,run['scope'],'write')
+        if is_withdrawn(store,db,run['source_id']):raise Conflict('来源已撤回，不能应用或重试')
         if action=='retry':
             permit_model(principal, run['scope'])
             if run['state']!='failed':raise Conflict('仅失败任务可重试')

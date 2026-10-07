@@ -1,0 +1,196 @@
+--- a/mcp-server/lib/upstream/client.js
++++ b/mcp-server/lib/upstream/client.js
+@@ -197,6 +197,11 @@
+   async callTool(name, args) {
+     await this.ensureInitialized();
+     const r = await this._rpc('tools/call', { name, arguments: args });
++    if (r && r.isError === true) {
++      // Tool-level errors may arrive with HTTP 200. Never turn them into receipts.
++      throw new MemoryCenterError('protocol', 'MCP tool rejected the request; inspect the tool result before retry',
++        { retryable: false, body: r });
++    }
+     return r;
+   }
+ 
+@@ -211,10 +216,10 @@
+ 
+   /** 查归档/索引状态。按来件：归档与索引状态分开看。 */
+   async importStatus({ sourceKey, sourceId, jobId }) {
+-    const args = {};
+-    if (sourceKey) args.source_key = sourceKey;
+-    if (sourceId) args.source_id = sourceId;
+-    if (jobId) args.job_id = jobId;
++    if (!jobId || sourceKey || sourceId) {
++      throw new MemoryCenterError('validation', 'memory_import_status requires jobId only');
++    }
++    const args = { job_id: jobId };
+     return this.callTool('memory_import_status', args);
+   }
+ }
+--- a/mcp-server/lib/upstream/bridge.js
++++ b/mcp-server/lib/upstream/bridge.js
+@@ -31,20 +31,20 @@
+ 
+ /** 从工具返回里抠出 source_id / job_id —— 服务端形状未核查，所以写得宽容。 */
+ function extractReceipt(result) {
+-  const out = { sourceId: null, jobId: null, raw: result };
+-  const seen = [];
+-  const walk = (v) => {
+-    if (!v || typeof v !== 'object') return;
+-    for (const [k, val] of Object.entries(v)) {
+-      if (typeof val === 'string') {
+-        if (/^source_?id$/i.test(k) && !out.sourceId) out.sourceId = val;
+-        if (/^job_?id$/i.test(k) && !out.jobId) out.jobId = val;
+-      } else if (typeof val === 'object') walk(val);
+-      seen.push(k);
+-    }
+-  };
+-  walk(result);
+-  return out;
++  if (!result || result.isError === true) throw new Error('Rejected MCP result cannot be a receipt');
++  let data = result.structuredContent;
++  if (!data) {
++    const text = (result.content || []).find(c => c.type === 'text');
++    if (text) { try { data = JSON.parse(text.text); } catch {} }
++  }
++  // Plain objects are retained for clients that already unwrap CallToolResult.
++  data = data || result;
++  const sourceId = data.id || data.source_id;
++  const jobId = data.job_id;
++  if (typeof sourceId !== 'string' || !sourceId || typeof jobId !== 'string' || !jobId) {
++    throw new Error('Missing source/job acknowledgement; cursor must not advance');
++  }
++  return { sourceId, jobId, raw: result };
+ }
+ 
+ function newBridge({ db, ledger, manifest, client, log = () => {} }) {
+--- a/mcp-server/lib/upstream/mapping.js
++++ b/mcp-server/lib/upstream/mapping.js
+@@ -16,13 +16,14 @@
+  */
+ 
+ const path = require('path');
++const { cpLength, messagesLength } = require('./wire-length');
+ const { stableId, versionHash, sourceKey, originalRef, payloadDigest, messageId, PARSER_VERSION } = require('./versions');
+ const { segmentBody, packBatches, MAX_PART_CP } = require('./segmenter');
+ const { resolveRole, resolveAuthor, resolveOriginalDate, resolveSourceType } = require('./roles');
+ 
+ /** 服务端接受的 source_metadata 键（**只有这六个**）。 */
+ const ALLOWED_META_KEYS = Object.freeze([
+-  'original_ref', 'original_date', 'author', 'locator', 'parser_version', 'parent_source_key',
++  'original_ref', 'original_date', 'author', 'locator', 'parser_version', 'parent_source_key', 'visibility',
+ ]);
+ 
+ const MAX_META_VALUE = 1000;
+@@ -37,7 +38,7 @@
+     }
+     const v = obj[k];
+     if (typeof v !== 'string') throw new Error(`source_metadata.${k} 必须是字符串`);
+-    if (v.length > MAX_META_VALUE) throw new Error(`source_metadata.${k} 超过 ${MAX_META_VALUE} 字符`);
++    if (cpLength(v) > MAX_META_VALUE) throw new Error(`source_metadata.${k} 超过 ${MAX_META_VALUE} 字符`);
+   }
+ }
+ 
+@@ -105,6 +106,7 @@
+     const meta = {
+       original_ref: ref,
+       parser_version: PARSER_VERSION,
++      parent_source_key: sk,
+       // locator：这一批覆盖的段落区间。起点含、终点不含（码点）。
+       locator: locatorRange(b.parts),
+     };
+@@ -119,7 +121,6 @@
+       // 而我们一批只装一部分消息 —— 所以批次必须能各自被幂等识别。
+       // 用 `#p0001` 后缀，重试时同一批仍是同一个 key。
+       source_key: `${sk}#p${String(bi + 1).padStart(4, '0')}`,
+-      parent_source_key: sk,
+       source_type: sourceType,
+       processing_policy: 'archive',
+       source_metadata: meta,
+@@ -165,21 +166,21 @@
+ function validatePayload(payload) {
+   const problems = [];
+   if (!payload.scope || typeof payload.scope !== 'string') problems.push('scope 缺失');
+-  if (!payload.source_key || payload.source_key.length > 300) problems.push('source_key 非法或超长');
++  if (!payload.source_key || cpLength(payload.source_key) > 300) problems.push('source_key 非法或超长');
+   if (payload.processing_policy !== 'archive') problems.push('processing_policy 必须是 archive');
+   if (!['conversation', 'document', 'imported_summary'].includes(payload.source_type)) problems.push('source_type 非法');
+   if (!Array.isArray(payload.messages) || payload.messages.length === 0) problems.push('messages 为空');
+   if (payload.messages && payload.messages.length > 100) problems.push('messages 超过 100 条');
+   const ids = new Set();
+   for (const m of payload.messages || []) {
+-    if (!m.id || m.id.length > 100) problems.push('消息 id 非法或超长');
++    if (!m.id || cpLength(m.id) > 100) problems.push('消息 id 非法或超长');
+     if (ids.has(m.id)) problems.push(`消息 id 批内重复：${m.id}`);
+     ids.add(m.id);
+     if (!m.text || m.text.length === 0) problems.push(`消息 ${m.id} 正文为空`);
+     if (!['user', 'assistant', 'external'].includes(m.role)) problems.push(`消息 ${m.id} role 非法：${m.role}`);
+   }
+-  const json = JSON.stringify(payload.messages);
+-  if (json.length > 24000) problems.push(`messages JSON ${json.length} > 24000`);
++  const size = messagesLength(payload.messages || []);
++  if (size > 24000) problems.push(`messages JSON ${size} > 24000`);
+   try { assertMeta(payload.source_metadata || {}); } catch (e) { problems.push(e.message); }
+   return problems;
+ }
+--- a/mcp-server/lib/upstream/segmenter.js
++++ b/mcp-server/lib/upstream/segmenter.js
+@@ -24,6 +24,7 @@
+ 
+ const { cpLength, toCodePoints, splitParagraphs, hardSplit } = require('./codepoints');
+ const { PARSER_VERSION } = require('./versions');
++const { messagesLength } = require('./wire-length');
+ 
+ const MAX_BATCH_MESSAGES = 100;
+ const MAX_BATCH_JSON_CHARS = 24000;
+@@ -38,7 +39,7 @@
+ const MAX_PART_CP = 6000;
+ 
+ function utf8JsonLen(obj) {
+-  return JSON.stringify(obj).length;   // JSON.stringify 输出的是 UTF-16 码元数
++  return messagesLength(obj);   // JSON.stringify 输出的是 UTF-16 码元数
+ }
+ 
+ /**
+@@ -57,12 +58,18 @@
+   }
+ 
+   paras.forEach((para, pi) => {
+-    if (cpLength(para.text) <= budget) {
++    if (cpLength(para.text) <= budget && Array.from(JSON.stringify(para.text)).length <= 20000) {
+       parts.push({ text: para.text, startCp: para.startCp, endCp: para.endCp, paraIndex: pi, partOfPara: false });
+       return;
+     }
++    // Leave a bound for JSON escapes as well as Unicode code points.
++    // Worst-case control characters encode to six wire characters each.
++    let safeBudget = budget;
++    if (Array.from(JSON.stringify(para.text)).length > 20000) {
++      safeBudget = Math.min(budget, Math.floor(20000 / 6));
++    }
+     // 超长单段：连续拆分，保留父来源、角色、位置
+-    for (const c of hardSplit(para.text, budget)) {
++    for (const c of hardSplit(para.text, safeBudget)) {
+       parts.push({
+         text: c.text,
+         startCp: para.startCp + c.startCp,
+--- /dev/null
++++ b/mcp-server/lib/upstream/wire-length.js
+@@ -0,0 +1,18 @@
++'use strict';
++// Match the memory center's normalized json.dumps(ensure_ascii=False,sort_keys=True).
++function serialized(value) {
++  if (Array.isArray(value)) return '[' + value.map(serialized).join(', ') + ']';
++  if (value && typeof value === 'object') return '{' + Object.keys(value).sort()
++    .map(k => JSON.stringify(k) + ': ' + serialized(value[k])).join(', ') + '}';
++  return JSON.stringify(value);
++}
++const cpLength = value => Array.from(value).length;
++function normalizedMessages(messages) {
++  return messages.map(m => {
++    const out = { id: m.id, role: m.role, text: m.text };
++    for (const key of ['source_title', 'created_at']) if (m[key] != null) out[key] = m[key];
++    return out;
++  });
++}
++const messagesLength = messages => cpLength(serialized(normalizedMessages(messages)));
++module.exports = { cpLength, messagesLength };

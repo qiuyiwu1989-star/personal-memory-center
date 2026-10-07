@@ -59,6 +59,27 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
         return p
 
     @mcp.tool()
+    def memory_capabilities(ctx:Context, scope:str='personal')->dict:
+        """Discover scoped interface readiness and limits without source text or an LLM. Refresh after credentials or deployments change."""
+        from .capabilities import describe
+        result=describe(store,principal(ctx),scope)
+        return CallToolResult(content=[TextContent(type='text',text=encoded(result))],structuredContent=result)
+
+    @mcp.tool()
+    def memory_changes(ctx:Context, scope:str='personal', cursor:str|None=None, max_chars:StrictInt=4000, limit:StrictInt=50)->dict:
+        """Check bounded current record metadata for context invalidation, not a delta/event log. Follow next_cursor, save the final checkpoint. Changed/stale means refetch governed context. No LLM or automatic candidate promotion."""
+        from .change_feed import changes
+        result=changes(store,principal(ctx),scope,cursor,max_chars,limit)
+        return CallToolResult(content=[TextContent(type='text',text=encoded(result))],structuredContent=result)
+
+    @mcp.tool()
+    def memory_candidate_submit(source_id:str, request_key:str, claims:list[dict], ctx:Context, scope:str='personal')->dict:
+        """Submit 1–20 source-bound suggestions with message_id/quote/start/end/statement/subject/topic/kind. Unicode code-point offsets, end exclusive. Requires explicit candidate_write in one Agent inbox plus read/source_read/write; source must belong to that writer. Stable request_key retries are idempotent. Zero model calls; never confirms facts."""
+        from .candidate_intake import submit
+        result=submit(store,principal(ctx),scope,{'source_id':source_id,'request_key':request_key,'claims':claims})
+        return CallToolResult(content=[TextContent(type='text',text=encoded(result))],structuredContent=result)
+
+    @mcp.tool()
     def memory_search(query:str, ctx:Context, scope:str='personal', max_chars:int=6000, retrieval_mode:str='lexical-v1')->dict:
         """Search bounded candidates. Default lexical-v1 retained; lexical-v2/v3 are opt-in lexical experiments, not semantic validation. No auto fallback or factual approval."""
         from .reading import search_page
@@ -107,6 +128,9 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
             row=db.execute('SELECT * FROM sources WHERE id=? AND owner=?',(source_id,p['owner'])).fetchone()
         if not row:raise ValueError('Source not found')
         permit(p,row['scope'],'source_read')
+        from .source_lifecycle import is_withdrawn
+        with store.db() as db:
+            if is_withdrawn(store,db,source_id):raise ValueError('Source withdrawn; use owner workbench audit history')
         for message in json.loads(row['payload']):
             if message['id']==message_id:
                 from .reading import source_page
@@ -151,6 +175,18 @@ def create_app(store, grants, model, browser_identity=None, origin='https://memo
         permit(p,row['scope'],'read')
         from .source_index_queue import status as index_status
         return dict(row) | {'index_status':index_status(store,p,row['scope'])}
+
+    @mcp.tool()
+    def memory_source_withdrawal_preview(source_id:str,ctx:Context,scope:str='personal',max_chars:int=6000)->dict:
+        """Owner-only bounded source withdrawal impact, no content or model calls."""
+        from .source_lifecycle import preview
+        return preview(store,principal(ctx),scope,source_id,max_chars)
+
+    @mcp.tool()
+    def memory_source_withdraw(source_id:str,ctx:Context,scope:str='personal',reason:str='')->dict:
+        """Owner-only idempotent source withdrawal; archive and history retained."""
+        from .source_lifecycle import withdraw
+        return withdraw(store,principal(ctx),scope,source_id,reason)
 
     mcp_app=mcp.streamable_http_app()
     @contextlib.asynccontextmanager

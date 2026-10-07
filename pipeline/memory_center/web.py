@@ -35,6 +35,7 @@ def load_grants(path):
 
 def blueprint(store, grants, model, browser_principal=None, credential_manager=None):
     bp = Blueprint('memory_center', __name__, url_prefix=PREFIX)
+    if isinstance(model, Model): model.store = store
 
     @bp.before_request
     def authenticate():
@@ -76,6 +77,115 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
         if not isinstance(data, dict):
             raise Invalid('请求应为 JSON 对象')
         return data
+
+    def integer(name, default):
+        value = request.args.get(name)
+        if value is None:return default
+        if not value.isascii() or not value.isdecimal():raise Invalid('分页参数应为整数')
+        try:return int(value)
+        except ValueError:raise Invalid('分页参数应为整数') from None
+
+    @bp.get('/capabilities')
+    def capabilities():
+        from .capabilities import describe
+        return jsonify(describe(store,g.memory_principal,request.args.get('scope','personal')))
+
+    @bp.get('/changes')
+    def memory_changes():
+        from .change_feed import changes
+        return Response(encoded(changes(store,g.memory_principal,request.args.get('scope','personal'),
+            request.args.get('cursor'),integer('max_chars',4000),integer('limit',50))),mimetype='application/json')
+
+    @bp.post('/candidate-intake')
+    def candidate_submit():
+        from .candidate_intake import submit
+        data=body();scope=data.pop('scope','personal')
+        result=submit(store,g.memory_principal,scope,data)
+        return jsonify(result),200 if result['duplicate'] else 201
+
+    @bp.get('/candidate-intake')
+    def candidate_receipts():
+        from .candidate_intake import listing
+        return jsonify(listing(store,g.memory_principal,request.args.get('scope','personal'),
+            integer('offset',0),integer('limit',20)))
+
+    @bp.get('/records/<record_id>')
+    def owner_record_detail(record_id):
+        p=g.memory_principal;scope=request.args.get('scope','personal')
+        if p.get('trusted_user') is not True:raise PermissionError('仅本人可读取候选复核详情')
+        permit(p,scope,'source_read')
+        rows=store.snapshot(p,scope,history=True,limit=1,include_jobs=False,_record_ids=[record_id])['records']
+        if not rows:raise Invalid('记录不存在或不可访问')
+        from .candidate_intake import available
+        with store.db() as db:
+            if available(store,db):
+                provenance=db.execute('SELECT e.message_role,e.quote_start,e.quote_end,e.receipt_id,c.principal '
+                    'FROM candidate_intake_evidence e JOIN candidate_intake_receipts c ON c.id=e.receipt_id '
+                    'WHERE e.record_id=? AND c.owner=? AND c.scope=?',(record_id,p['owner'],scope)).fetchone()
+                if provenance:rows[0]['candidate_intake']=dict(provenance)
+        return jsonify(record=rows[0])
+
+    @bp.get('/configuration')
+    def configuration_list():
+        from .configuration import listing
+        return jsonify(listing(store,g.memory_principal,request.args.get('scope','personal'),request.args.get('offset',0),request.args.get('limit',20),request.args.get('event_offset',0)))
+
+    @bp.get('/configuration/compare')
+    def configuration_compare():
+        from .configuration import compare
+        return jsonify(compare(store,g.memory_principal,request.args.get('scope','personal'),request.args.get('left'),request.args.get('right')))
+
+    @bp.get('/configuration/skill-download')
+    def configuration_skill_download():
+        from .configuration import skill_export
+        data = skill_export(store,g.memory_principal,request.args.get('scope','personal'),request.args.get('version_id'),request.args.get('name'))
+        response = Response(data['text'].encode('utf-8'), content_type='text/markdown; charset=utf-8')
+        response.headers['Content-Disposition'] = 'attachment; filename="' + data['filename'] + '"'
+        response.headers['X-Skill-SHA256'] = data['sha256']
+        response.headers['X-Skill-Publication'] = data['publication']
+        return response
+
+    @bp.post('/configuration/versions')
+    def configuration_draft():
+        from .configuration import draft
+        data=body();scope=data.pop('scope','personal')
+        return jsonify(draft(store,g.memory_principal,scope,data)),201
+
+    @bp.post('/configuration/versions/<version_id>/activate')
+    def configuration_activate(version_id):
+        from .configuration import activate
+        data=body();scope=data.pop('scope','personal')
+        return jsonify(activate(store,g.memory_principal,scope,version_id,data))
+
+    @bp.get('/source')
+    def source_message():
+        from .reading import source_page
+        p=g.memory_principal
+        with store.db() as db:
+            row=db.execute('SELECT * FROM sources WHERE id=? AND owner=?',(request.args.get('source_id'),p['owner'])).fetchone()
+        if not row:raise Invalid('来源不存在')
+        permit(p,row['scope'],'source_read')
+        from .source_lifecycle import is_withdrawn
+        with store.db() as db:
+            if is_withdrawn(store,db,row['id']):raise Invalid('来源已撤回；历史证据请通过本人工作台审计查看')
+        try:
+            offset=int(request.args.get('offset','0'));max_chars=int(request.args.get('max_chars','4000'))
+        except ValueError:raise Invalid('原文分页参数无效') from None
+        for message in json.loads(row['payload']):
+            if message['id']==request.args.get('message_id'):
+                return jsonify(source_page(row['source_key'],message,offset,max_chars))
+        raise Invalid('消息不存在')
+
+    @bp.get('/memory-map')
+    def memory_map():
+        from .visual_map import build
+        def number(name,default):
+            raw=request.args.get(name,str(default))
+            if not raw.isascii() or not raw.isdecimal():raise Invalid('分页参数无效')
+            try:return int(raw)
+            except ValueError:raise Invalid('分页参数无效') from None
+        return jsonify(build(store,g.memory_principal,request.args.get('scope','personal'),
+            request.args.get('q',''),request.args.get('state',''),number('offset',0),number('limit',40)))
 
     @bp.get('/status')
     def status():
@@ -146,6 +256,31 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
         result=bundle(store,g.memory_principal,request.args.get('scope','personal'),request.args.get('q',''),
                       request.args.get('max_chars',6000,type=int),request.args.get('retrieval_mode','lexical-v1'))
         return Response(encoded(result),mimetype='application/json')
+
+    @bp.get('/sources/<source_id>/ledger')
+    def source_governance_ledger(source_id):
+        from .source_ledger import source_ledger
+        return jsonify(source_ledger(store,g.memory_principal,request.args.get('scope','personal'),source_id,
+                                     request.args.get('limit',20),request.args.get('offset',0)))
+
+    @bp.get('/records/<record_id>/ledger')
+    def record_governance_ledger(record_id):
+        from .source_ledger import record_ledger
+        return jsonify(record_ledger(store,g.memory_principal,request.args.get('scope','personal'),record_id,
+                                     request.args.get('limit',20),request.args.get('offset',0)))
+
+    @bp.get('/sources/<source_id>/withdrawal-preview')
+    def source_withdrawal_preview(source_id):
+        from .source_lifecycle import preview
+        return jsonify(preview(store,g.memory_principal,request.args.get('scope','personal'),source_id,
+                               request.args.get('max_chars',6000,type=int)))
+
+    @bp.post('/sources/<source_id>/withdraw')
+    def source_withdrawal(source_id):
+        from .source_lifecycle import withdraw
+        data=body()
+        if set(data)-{'scope','reason'}: raise Invalid('撤回字段无效')
+        return jsonify(withdraw(store,g.memory_principal,data.get('scope','personal'),source_id,data.get('reason','')))
 
     @bp.get('/sources/<source_id>/dependencies')
     def source_dependencies(source_id):
@@ -238,8 +373,12 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
 
     @bp.get('/records')
     def records():
-        return jsonify(store.snapshot(g.memory_principal, request.args.get('scope', 'personal'),
-                        request.args.get('q', ''), request.args.get('history') == '1', governance_filter=request.args.get('state') or None))
+        p=g.memory_principal;scope=request.args.get('scope','personal');history=request.args.get('history')=='1'
+        if history:
+            if p.get('trusted_user') is not True:raise PermissionError('仅本人可读取记忆历史审计')
+            permit(p,scope,'source_read')
+        return jsonify(store.snapshot(p,scope,request.args.get('q',''),history,
+                        governance_filter=request.args.get('state') or None))
 
     @bp.post('/owner-records')
     def owner_create():
@@ -384,6 +523,7 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
 
 
 def start_worker(store, model):
+    if isinstance(model, Model): model.store = store
     import logging
     stop = threading.Event()
     def work():

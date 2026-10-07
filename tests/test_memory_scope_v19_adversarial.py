@@ -31,21 +31,22 @@ class ScopeV19AdversarialTest(unittest.TestCase):
             'statement': statement, 'evidence_id': sid,
         }]}, spans, version=version)['claims'][0]
 
-    @unittest.expectedFailure
     def test_independent_wish_before_other_project_condition_is_deliverable(self):
-        # Frozen coverage target remains unimplemented. Expected failure is not
-        # acceptance: do not replace this desired split with an abstention test.
+        # Frozen original contrast is delivered by explicit experimental v22.
+        # The v19/v21 historical fallback is asserted separately.
         text = '我希望项目 Atlas 保留每条原始证据。如果独立评测通过，我计划发布项目 Orion。'
-        request, spans, _ = self.prepare(text)
+        request, spans, _ = self.prepare(text, '2026-10-04.22')
         self.assertEqual(len(spans), 2)
         first, second = list(spans)
-        delivered = self.resolve(spans, first, '用户希望项目 Atlas 保留每条原始证据。')
+        delivered = self.resolve(spans, first, '用户希望项目 Atlas 保留每条原始证据。', version='2026-10-04.22')
         self.assertEqual(delivered['modality'], 'wish')
         self.assertEqual(delivered['quote'], text[:text.index('如果')])
         self.assertEqual(request['source_visibility']['status'], 'visible_only')
+        for historic in (VERSION, '2026-10-03.21'):
+            self.assertEqual(len(self.prepare(text, historic)[1]), 1)
         with self.assertRaises(Invalid):
-            self.resolve(spans, second, '用户计划发布项目 Orion。')
-        conditional = self.resolve(spans, second, '如果独立评测通过，用户计划发布项目 Orion。')
+            self.resolve(spans, second, '用户计划发布项目 Orion。', version='2026-10-04.22')
+        conditional = self.resolve(spans, second, '如果独立评测通过，用户计划发布项目 Orion。', version='2026-10-04.22')
         self.assertEqual(conditional['modality'], 'conditional')
 
     def test_explicit_independence_declaration_delivers_wish_not_approval(self):

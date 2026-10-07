@@ -39,3 +39,11 @@ body.memory-module{margin:0;background:var(--v-bg);color:var(--v-ink)}
 .mc-page .markdown-reader{max-height:65vh;overflow:auto;line-height:1.8;padding:8px 0}.mc-page .markdown-reader h1{font-size:23px;margin:16px 0}.mc-page .markdown-reader h2{font-size:17px;border-bottom:1px solid var(--v-line);padding-bottom:8px;margin-top:26px}.mc-page .markdown-reader h3{font-size:14px;margin-top:18px}.mc-page .markdown-reader p{overflow-wrap:anywhere;margin:10px 0}
 
 .mc-page .failure-detail{border-left:2px solid var(--v-danger);padding-left:10px;margin:10px 0;overflow-wrap:anywhere}.mc-page .failure-detail summary{color:var(--v-danger)}.mc-page .failure-detail p{white-space:pre-wrap;font-size:12px}
+
+/* Configuration and source relationships share existing workstation tokens. */
+.mc-page .config-layout{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:20px 0}.mc-page .config-layout>section,.mc-page .config-layout>div{min-width:0}.mc-page .config-version{padding:14px;border:1px solid var(--v-line);border-radius:var(--v-radius-xs);margin:12px 0}.mc-page #configuration-baseline,.mc-page .config-version pre,.mc-page #configuration-integrations pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:300px;overflow:auto;font-size:12px}.mc-page .map-record{display:block;width:100%;text-align:left;margin:8px 0;white-space:normal}.mc-page .map-record[aria-pressed="true"]{border-color:var(--v-accent);background:var(--v-accent-soft)}.mc-page .map-diagram{overflow:auto}.mc-page .map-diagram svg{width:100%;min-width:440px}.mc-page .map-diagram rect{fill:var(--v-bg2);stroke:var(--v-line)}.mc-page .map-diagram path{stroke:var(--v-accent);fill:none}.mc-page .map-diagram text{fill:var(--v-ink);font-size:12px}@media(max-width:800px){.mc-page .config-layout{grid-template-columns:1fr}}
+
+/* Candidate receipts reuse existing cards; long source and record IDs wrap. */
+.mc-page .candidate-intake h3{flex:1}.mc-page .candidate-intake [data-error="true"]{color:var(--v-danger)}
+.mc-page .intake-receipt{padding:16px 0}.mc-page .intake-receipt>details{margin-top:12px}.mc-page .intake-receipt .tile-actions{margin-top:8px}
+.mc-page .intake-record{padding:10px 0;border-bottom:1px solid var(--v-line)}.mc-page .intake-record:last-child{border-bottom:0}.mc-page .intake-record>p{font-family:var(--font-mono,monospace);overflow-wrap:anywhere}

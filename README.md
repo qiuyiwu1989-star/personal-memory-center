@@ -1,6 +1,10 @@
 # Personal Memory Center · 个人记忆中枢
 
+当前执行入口：[2026-10-07 记忆中心执行看板](docs/diagrams/2026-10-07-记忆中心执行看板.html)。包含本轮限定用途请求、首批候选及 LocalVault 新版兼容交付；生产状态与开发成果分别记录。
+
 Source-backed, attributable, time-aware, correctable context for humans and agents.
+
+> **状态导航（2026-10-07）**：[项目深度复盘与架构图](docs/diagrams/2026-10-07-个人记忆中枢深度复盘.html)。下文保留 0.2 初版说明，工具数量及部分能力描述存在历史口径；请以[最新上线记录](docs/SOURCE-GOVERNANCE-PRODUCTION-2026-10-05.md)和[MCP 契约的 10 月 5 日补充](docs/MCP-CONTRACT-2026-10-01.md)为准。最近生产数据核查是 10 月 5 日。
 
 **让你和 Agent 在需要时，取得有出处、知道是谁的观点、仍然有效的上下文，并且能纠正它。**
 

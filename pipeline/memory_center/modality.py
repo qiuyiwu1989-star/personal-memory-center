@@ -191,3 +191,48 @@ def scoped_evidence_ranges_v19(text):
             continue
         return [(0,cut),(cut,len(text))]
     return fallback
+
+
+SCOPED_V22_GUARD_VERSION = 'condition-scope-v3-distinct-projects'
+
+
+def scoped_evidence_ranges_v22(text):
+    """Release only two self-contained first-person, distinct named projects.
+
+    A condition on one project must not contaminate a preceding independent
+    wish for another. This narrow lexical split is NOT semantic entailment.
+    Lists, quotations, shared scope, omitted subjects and named cross-project
+    dependencies retain the complete passage. Historic method versions are
+    unchanged. Sentence order alone does not establish scope independence.
+    """
+    fallback = scoped_evidence_ranges_v19(text)
+    if not CONDITION.search(text):
+        return fallback
+    if LIST.search(text) or re.search(
+        r'说|表示|认为|转述|引述|原话|写道|来信|访谈|转发|以下|下面|'
+        r'[“”「」《》"\[\]【】（）()]|[\'`]|'
+        r'上述|前述|以上|这项|该项|它|其|两项|共同|均|都|同样|前提|只有|除非|'
+        r'\b(?:said|says|both|same|these|it)\b', text, re.I):
+        return fallback
+    # Require exactly two complete sentences; postposed conditions remain
+    # attached and additional context requires review rather than guessing.
+    sentences = list(re.finditer(r'[^。！？!?\n]+[。！？!?]', text))
+    if len(sentences) != 2 or ''.join(m.group() for m in sentences) != text:
+        return fallback
+    project = re.compile(r'项目\s+([A-Za-z][A-Za-z0-9_-]*)(?![A-Za-z0-9_-])')
+    projects = [project.findall(m.group()) for m in sentences]
+    if any(len(names) != 1 for names in projects) or projects[0][0].casefold() == projects[1][0].casefold():
+        return fallback
+    unconditional = re.compile(r'\s*我(?:希望|想要|期望|计划|打算|准备)项目\s+[A-Za-z][A-Za-z0-9_-]*')
+    conditional = re.compile(r'\s*(?:如果|倘若|假如)[^。！？!?\n]{1,80}[，,]\s*我(?:希望|想要|期望|计划|打算|准备)')
+    first, second = [m.group() for m in sentences]
+    for plain, guarded in ((first, second), (second, first)):
+        if (unconditional.match(plain) and not CONDITION.search(plain)
+                and conditional.match(guarded) and len(list(CONDITION.finditer(guarded))) == 1):
+            # A name in the antecedent or an explicit reference to the other
+            # project creates a dependency, even when action subjects differ.
+            antecedent = guarded.split('，', 1)[0].split(',', 1)[0]
+            if project.search(antecedent) or any(name.casefold() in guarded.casefold() for name in project.findall(plain)):
+                continue
+            return [(0, sentences[0].end()), (sentences[0].end(), len(text))]
+    return fallback

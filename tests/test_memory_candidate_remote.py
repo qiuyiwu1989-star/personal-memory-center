@@ -112,7 +112,7 @@ class CandidateRemoteTest(unittest.TestCase):
         with self.protocol() as client:
             response=client.post('/mcp/',headers=self.headers(),json={'jsonrpc':'2.0','id':1,'method':'tools/list','params':{}}).json()
             tools={tool['name']:tool for tool in response['result']['tools']}
-            self.assertEqual(len(tools),10)
+            self.assertTrue({'memory_context','memory_candidate_search','memory_source_withdraw'}.issubset(set(tools)))
             old=tools['memory_search']['inputSchema']
             self.assertEqual(set(old['properties']),{'query','scope','max_chars','retrieval_mode'})
             self.assertEqual(old['required'],['query'])

@@ -15,7 +15,8 @@ class CrossAgentCorrectionTest(unittest.TestCase):
     tearDown = fixture.MemoryTest.tearDown
 
     def protocol(self):
-        grants = [dict(self.owner, token_sha256=hashlib.sha256(b'synthetic-owner-protocol').hexdigest())]
+        grants = [dict(self.owner, actions=list(set(self.owner['actions'])|{'source_read'}),
+                       token_sha256=hashlib.sha256(b'synthetic-owner-protocol').hexdigest())]
         for name in ('alpha', 'beta'):
             grants.append(dict(self.owner, id='synthetic-'+name, actions=['read'], trusted_user=False,
                                token_sha256=hashlib.sha256(('synthetic-'+name).encode()).hexdigest()))
