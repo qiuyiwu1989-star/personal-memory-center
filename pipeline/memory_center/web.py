@@ -78,6 +78,53 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
             raise Invalid('请求应为 JSON 对象')
         return data
 
+    def integer(name, default):
+        value = request.args.get(name)
+        if value is None:return default
+        if not value.isascii() or not value.isdecimal():raise Invalid('分页参数应为整数')
+        try:return int(value)
+        except ValueError:raise Invalid('分页参数应为整数') from None
+
+    @bp.get('/capabilities')
+    def capabilities():
+        from .capabilities import describe
+        return jsonify(describe(store,g.memory_principal,request.args.get('scope','personal')))
+
+    @bp.get('/changes')
+    def memory_changes():
+        from .change_feed import changes
+        return Response(encoded(changes(store,g.memory_principal,request.args.get('scope','personal'),
+            request.args.get('cursor'),integer('max_chars',4000),integer('limit',50))),mimetype='application/json')
+
+    @bp.post('/candidate-intake')
+    def candidate_submit():
+        from .candidate_intake import submit
+        data=body();scope=data.pop('scope','personal')
+        result=submit(store,g.memory_principal,scope,data)
+        return jsonify(result),200 if result['duplicate'] else 201
+
+    @bp.get('/candidate-intake')
+    def candidate_receipts():
+        from .candidate_intake import listing
+        return jsonify(listing(store,g.memory_principal,request.args.get('scope','personal'),
+            integer('offset',0),integer('limit',20)))
+
+    @bp.get('/records/<record_id>')
+    def owner_record_detail(record_id):
+        p=g.memory_principal;scope=request.args.get('scope','personal')
+        if p.get('trusted_user') is not True:raise PermissionError('仅本人可读取候选复核详情')
+        permit(p,scope,'source_read')
+        rows=store.snapshot(p,scope,history=True,limit=1,include_jobs=False,_record_ids=[record_id])['records']
+        if not rows:raise Invalid('记录不存在或不可访问')
+        from .candidate_intake import available
+        with store.db() as db:
+            if available(store,db):
+                provenance=db.execute('SELECT e.message_role,e.quote_start,e.quote_end,e.receipt_id,c.principal '
+                    'FROM candidate_intake_evidence e JOIN candidate_intake_receipts c ON c.id=e.receipt_id '
+                    'WHERE e.record_id=? AND c.owner=? AND c.scope=?',(record_id,p['owner'],scope)).fetchone()
+                if provenance:rows[0]['candidate_intake']=dict(provenance)
+        return jsonify(record=rows[0])
+
     @bp.get('/configuration')
     def configuration_list():
         from .configuration import listing
@@ -118,6 +165,9 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
             row=db.execute('SELECT * FROM sources WHERE id=? AND owner=?',(request.args.get('source_id'),p['owner'])).fetchone()
         if not row:raise Invalid('来源不存在')
         permit(p,row['scope'],'source_read')
+        from .source_lifecycle import is_withdrawn
+        with store.db() as db:
+            if is_withdrawn(store,db,row['id']):raise Invalid('来源已撤回；历史证据请通过本人工作台审计查看')
         try:
             offset=int(request.args.get('offset','0'));max_chars=int(request.args.get('max_chars','4000'))
         except ValueError:raise Invalid('原文分页参数无效') from None
@@ -323,8 +373,12 @@ def blueprint(store, grants, model, browser_principal=None, credential_manager=N
 
     @bp.get('/records')
     def records():
-        return jsonify(store.snapshot(g.memory_principal, request.args.get('scope', 'personal'),
-                        request.args.get('q', ''), request.args.get('history') == '1', governance_filter=request.args.get('state') or None))
+        p=g.memory_principal;scope=request.args.get('scope','personal');history=request.args.get('history')=='1'
+        if history:
+            if p.get('trusted_user') is not True:raise PermissionError('仅本人可读取记忆历史审计')
+            permit(p,scope,'source_read')
+        return jsonify(store.snapshot(p,scope,request.args.get('q',''),history,
+                        governance_filter=request.args.get('state') or None))
 
     @bp.post('/owner-records')
     def owner_create():

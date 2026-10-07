@@ -82,4 +82,19 @@ class CredentialTests(unittest.TestCase):
         self.assertNotIn(token,self.path.read_text())
         self.assertNotIn(token,json.dumps(self.manager.list(self.p)))
 
+    def test_candidate_writer_requires_explicit_action_and_isolated_source_access(self):
+        candidate=dict(self.body,request_key='candidate',scopes=['agent:synthetic-inbox'],
+                       actions=['read','source_read','write','candidate_write'])
+        row=self.manager.create(self.p,candidate)['credential']
+        self.assertIn('candidate_write',row['actions'])
+        self.assertTrue(row['archive_only'])
+        self.assertFalse(load_grants(self.path)[0]['trusted_user'])
+        old_writer=self.manager.create(self.p,dict(candidate,request_key='archive',actions=['read','write']))
+        self.assertNotIn('candidate_write',old_writer['credential']['actions'])
+        for actions in (['read','candidate_write'],['read','write','candidate_write'],['read','source_read','candidate_write']):
+            with self.assertRaises(Invalid):self.manager.create(self.p,dict(candidate,request_key='bad',actions=actions))
+        with self.assertRaises(Invalid):self.manager.create(self.p,dict(candidate,scopes=['personal']))
+        with self.assertRaises(PermissionError):
+            self.manager.create(dict(self.p,actions=['read','write']),candidate)
+
 if __name__=='__main__':unittest.main()

@@ -45,10 +45,15 @@ class AgentCredentials:
         if not isinstance(key,str) or not 1<=len(key)<=160 or not isinstance(label,str) or not 1<=len(label.strip())<=120:raise Invalid('需要请求键与简短用途')
         if type(days) is not int or not 1<=days<=90:raise Invalid('有效期为 1–90 天')
         if not isinstance(scopes,list) or not 1<=len(scopes)<=10 or any(not isinstance(s,str) for s in scopes) or len(set(scopes))!=len(scopes):raise Invalid('需选择授权范围')
-        if not isinstance(actions,list) or not actions or any(a not in ('read','source_read','write') for a in actions) or len(set(actions))!=len(actions) or 'read' not in actions:raise Invalid('权限组合无效')
+        if not isinstance(actions,list) or not actions or any(a not in ('read','source_read','write','candidate_write') for a in actions) or len(set(actions))!=len(actions) or 'read' not in actions:raise Invalid('权限组合无效')
+        if 'candidate_write' in actions and not {'read','source_read','write'}.issubset(actions):
+            raise Invalid('候选提交需同时具备读取、原文读取与归档写入权限')
         if 'write' in actions and (len(scopes)!=1 or not scopes[0].startswith('agent:') or not scopes[0].endswith('-inbox')):raise Invalid('写入凭据只允许单独 Agent 收件范围')
         for scope in scopes:
-            for action in actions:permit(p,scope,action)
+            # The trusted owner delegates an explicit zero-model capability.
+            # Existing owner grants need not contain a newly introduced action;
+            # their scope write and source_read permissions are still required.
+            for action in actions:permit(p,scope,'write' if action=='candidate_write' else action)
         spec={'archive_only':True,'description':label.strip(),'scopes':sorted(scopes),'actions':sorted(actions),'days':days}
         digest=hashlib.sha256(json.dumps(spec,sort_keys=True).encode()).hexdigest()
         ident='agent-'+hashlib.sha256(json.dumps([p['owner'],p['id'],key]).encode()).hexdigest()[:24]

@@ -38,6 +38,14 @@ At a meaningful boundary inspect `memory_import_status`, avoiding repeated polli
 Persist the returned id (source ID), job_id and duplicate against the submitted part;
 HTTP 200 with isError is a rejection, not a receipt. Report the source/job pointers and remaining governance work, not raw private text.
 
+When authorized to submit already-derived suggestions, and advertised capabilities
+show `memory_candidate_submit` is ready and allowed, follow the source receipt with
+an exact-quote candidate batch. This requires a separately granted `candidate_write`
+action in one inbox and the same source-creating principal. It calls no server LLM
+and does not confirm facts. Read the candidate section of the import reference for
+Unicode offsets, immutable retries and receipt handling. Missing capability means
+archive-only capture; do not trigger paid extraction as a substitute.
+
 If a host project-memory protocol already maintains this same judgment, follow it
 and avoid duplicate writes. Do not supersede existing judgments through a fresh
 archive import; use the host's supported search/supersession workflow when authorized.

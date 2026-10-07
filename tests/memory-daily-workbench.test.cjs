@@ -28,6 +28,11 @@ function setup({overview={},budget={},transport}={}){
 function find(root,predicate){if(predicate(root))return root;for(const child of root.children){const result=find(child,predicate);if(result)return result;}}
 const identity={can_correct:true,actions:['read','write'],scopes:['personal','claude:history-synthetic']};
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
+test('upstream candidate record card never labels the submission as backend model extraction',async()=>{
+  const {$,ui}=setup({transport:async(url,responses)=>url.includes('/records?')?{total:1,jobs:[],records:[{id:'synthetic-upstream',statement:'Synthetic upstream.',quote:'Synthetic evidence.',processing_method:'upstream_candidate',topic:'topics',status:'source_reported',lifecycle:'active',revision:1,governance:{state:'candidate',priority:'P3'}}]}:responses[new URL(url,'http://synthetic').pathname.split('/').pop()]});
+  ui.setIdentity(identity);await ui.refresh();const host=$('records');
+  assert.ok(find(host,e=>e.textContent==='上游提交候选'));assert.equal(find(host,e=>e.textContent==='后台模型提炼'),undefined);
+});
 test('personal shortcut cannot write into the history currently being viewed',async()=>{
   const {$,ui,calls}=setup();ui.setIdentity(identity);$('scope').value='claude:history-synthetic';$('history').checked=true;$('query').value='old search';
   await $('daily-owner-add').emit('click');await flush();assert.equal($('scope').value,'personal');assert.equal($('history').checked,false);assert.equal($('query').value,'');

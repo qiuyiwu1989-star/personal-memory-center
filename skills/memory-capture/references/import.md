@@ -97,3 +97,40 @@ switch credentials, impersonate trusted_user or mark the remote source withdrawn
 based on local intent. Current withdrawal retains archive/history; it is not physical
 byte erasure. Each imported part has its own source ID; parent linkage does not make
 a one-call withdrawal. Unsettled bulk jobs can block withdrawal and require resolution.
+
+## Submit existing suggestions without server extraction
+
+This optional development capability must be advertised and migration-ready;
+older deployments still support ordinary archive capture. `memory_capabilities`
+reports `candidate_intake.available` and `.authorized`; tools/list alone cannot.
+An upstream node needs read/source_read/write/**candidate_write**, exactly one
+`agent:…-inbox` scope, and its own source from a successful archive receipt.
+The existing archive-only restriction still prevents spending model tokens.
+
+Call `memory_candidate_submit` with that scope, `source_id` (the import receipt's
+`id`), a stable `request_key`, and 1–20 `claims`. Each claim contains
+message_id, quote, start, end, statement, subject, topic and kind; optional
+client_candidate_id links the returned record back to local preparation.
+Statement is at most 1,200 characters; quote at most 2,000. Topics are profile,
+preferences, people, areas, projects, topics. Kinds are identity, preference,
+relationship, decision, plan, event, claim, suggestion.
+
+Offsets count Unicode code points in the exact archived message and end is
+exclusive. Check `Array.from(text).slice(start,end).join('') === quote` in a
+JavaScript client. After source segmentation, use the returned part's message ID
+and **part-local** offsets, retaining parent locators separately; crossing two
+parts is not a single quote accepted by this interface. Preserve source roles;
+do not submit holder, verified status, effective dates or role overrides.
+
+The response has id (candidate receipt ID), source_id, record_ids, count,
+duplicate, candidate_only=true, facts_confirmed=false and model_calls=0. Store
+it separately from the source/job receipt. Same principal/scope/request_key with
+identical content replays the receipt; changed content conflicts. Unknown
+outcomes use the same payload/key, with bounded retries. Withdrawal or revoked
+access rejects replay. The full batch commits or fails together.
+
+The server validates quote location and produces reviewable candidates with
+unknown identities and dates. It does not semantically approve suggestions,
+promote them to personal, or perform another LLM extraction. A node may derive
+suggestions locally if separately authorized; center receipt model_calls=0 does
+not measure the node's own model usage. The owner reviews in the workbench.

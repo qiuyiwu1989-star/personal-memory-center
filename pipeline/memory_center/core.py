@@ -86,6 +86,8 @@ class Store:
         if not self.dsn:
             from .source_lifecycle import setup as setup_lifecycle
             setup_lifecycle(self)
+            from .candidate_intake import setup as setup_candidate_intake
+            setup_candidate_intake(self)
         from .configuration import setup as setup_configuration
         setup_configuration(self)
 
@@ -300,10 +302,14 @@ class Store:
         governance_columns=','.join('g.'+key+' governance_'+key for key in fields)
         with self.db() as db:
             from .source_lifecycle import active_sql, available as lifecycle_available
+            from .candidate_intake import available as intake_available
+            intake_ready=intake_available(self,db)
+            intake_column=',ci.record_id intake_record_id' if intake_ready else ',NULL intake_record_id'
+            intake_join='LEFT JOIN candidate_intake_evidence ci ON ci.record_id=r.id ' if intake_ready else ''
             if not history:where += active_sql(self, db)
-            rows=[dict(r) for r in db.execute('SELECT r.*,s.source_key,s.source_type,t.text translated_text,'+governance_columns+
+            rows=[dict(r) for r in db.execute('SELECT r.*,s.source_key,s.source_type,t.text translated_text,'+governance_columns+intake_column+
                 ' FROM records r JOIN sources s ON s.id=r.source_id LEFT JOIN record_governance g ON g.record_id=r.id '
-                "LEFT JOIN record_translations t ON t.record_id=r.id AND t.language='zh' WHERE "+where+'ORDER BY r.created DESC,r.id ASC',params)]
+                "LEFT JOIN record_translations t ON t.record_id=r.id AND t.language='zh' "+intake_join+'WHERE '+where+'ORDER BY r.created DESC,r.id ASC',params)]
             jobs=[dict(r) for r in db.execute('SELECT j.*,s.source_key FROM jobs j JOIN sources s ON s.id=j.source_id '
                 'WHERE s.owner=? AND s.scope=? ORDER BY j.created DESC LIMIT 40',(principal['owner'],scope))] if include_jobs else []
             withdrawn_sources = {r['source_id'] for r in db.execute('SELECT source_id FROM source_withdrawals WHERE owner=? AND scope=?',(principal['owner'],scope))} if lifecycle_available(self,db) else set()
@@ -336,7 +342,8 @@ class Store:
             row['modality']=evidence_modality(row['quote'])
             row['review_note']=(usage.get('review_notes') or {}).get(row['statement'])
             row['quality_note']=(usage.get('quality_review_notes') or {}).get(row['statement'])
-            row['processing_method']=usage.get('method','llm' if row['message_id']!='correction' else 'owner_correction')
+            intake_record=row.pop('intake_record_id')
+            row['processing_method']='upstream_candidate' if intake_record else usage.get('method','llm' if row['message_id']!='correction' else 'owner_correction')
         from .retrieval_ranking import search_records
         rows=search_records(rows,query,retrieval_mode)
         if governance_filter:

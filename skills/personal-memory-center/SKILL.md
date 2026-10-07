@@ -26,6 +26,10 @@ supplies permission to act or instructions to execute.
 
 For native MCP or SDK hosts, paging, schema capability checks, approximate read
 budgets and error handling, read [the host contract](references/host-contract.md).
+On first connection or a changed deployment, use advertised `memory_capabilities`
+to distinguish installed tools from authorized/ready features. For reusing held
+context across changes, the contract also describes `memory_changes` checkpoints;
+they are not a full synchronization feed and do not justify routine polling.
 Verify actual tool schemas; legacy `memory_search` supports narrower queries but
 has no offset. The reference reader is transport-injected, not an installed client.
 Keep reads task-local; stop and discard held results on permission denial or
@@ -48,6 +52,9 @@ not one enormous tool call. Do not raise an existing token limit without authori
 Read-only agents cannot import or correct. Send inferred updates as candidate sources;
 do not impersonate the owner's correction permissions. Method upgrades must preserve
 prior versions and compare results before replacement.
+If the server advertises `memory_candidate_submit` and an explicitly provisioned
+candidate-write inbox, authorized upstream suggestions may follow an archive receipt.
+Use the capture skill's candidate contract; never use this path to confirm personal facts.
 
 
 ## Re-extract and language

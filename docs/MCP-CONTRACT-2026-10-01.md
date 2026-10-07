@@ -16,6 +16,11 @@
 | `memory_import` | source_key/messages 必填；source_type=document；processing_policy=archive | scoped write；最多100条、24,000序列化字符，默认只归档，不调用提炼模型 |
 | `memory_reextract` | source_id/request_key 必填 | scoped read+write；返回排队 ID，不覆盖旧版，不确认候选；使用当前方法和同一模型预算 |
 | `memory_import_status` | job_id 必填 | 同 owner、scope read；返回单任务 state/attempts/error/usage，不返回原文；received 不等于完成 |
+| `memory_capabilities` | scope=personal；开发版本新增 | read；声明接口就绪、当前授权、迁移与限额；不证明外围客户端已对接 |
+| `memory_candidate_submit` | source_id/request_key/claims 必填；每批1–20条 | read+source_read+write+独立 candidate_write；同创建者的单一 Agent inbox 来源；精确引文位置；只产生候选，无中心 LLM 调用 |
+| `memory_changes` | scope=personal；cursor可空；max_chars=4000（1000–16000）；limit=50（1–100） | read；当前记录元数据检查点，变化后重读可信上下文；不是完整事件 delta 或 COS 同步 |
+
+2026-10-07 新增接口尚未生产发布；候选接口需要独立迁移010。完整边界及发布顺序见 [上下游扩展交付](INTERFACE-EXPANSION-2026-10-07.md)。
 
 所有读取均不调用提炼模型。分页与搜索预算为 **500–16,000 字符**，计算序列化返回信封，不能转换成精确账单 tokens。正文跟随 `next_offset` 拼接；检索返回 `truncated`；旧 memory_search 无 offset。新增 memory_candidate_search 按 coverage.continue_offset 续读；预算遗漏可重读同窗，排名会随并发写入变化，不保证稳定快照。上限及原文权限见 [候选远程读取](CANDIDATE-REMOTE-READING.md)。空返回须说明范围与治理口径，不等于“从未发生”。
 
