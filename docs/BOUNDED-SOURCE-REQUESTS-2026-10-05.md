@@ -37,3 +37,21 @@ bundle = verified_bounded_source_request(envelope, archive_plan,
 `Model(store, method_version='2026-10-04.22').extract_bounded_source(envelope, archive_plan, request_id, principal, trial_key)` 会从原件重新生成请求，验证本人 read/source_read/model 权限，先预留已有账本预算（含系统提示、附加提示、DATA字节与输出），再调用配置模型并核验原消息证据。相同试跑键不自动重调；未知用量保留预留，坏产出也结算实际费用。输出不写入记忆或确认质量。
 
 8项合成模型入口测试通过，包含非空受支持产出、原定位、无预算/无模型配置不调用、篡改原件拒绝、重复键、未知用量和坏产出计费。本轮未调用真实模型，没有生产worker接入或预算修改。
+
+## 2026-10-07：限定用途请求，不解除原 partial
+
+新增 `scoped_source_request`，复用上述原件验证与证据选择，只允许两种开发用途：即时指令负例、历史说话人更正。复核者提供原消息区间；程序从原件取文本，保留角色、来源路由、精确偏移和全文哈希。不能增加证据、替换原话、遗漏所选证据或把辅助上下文作为证据。重叠、越界、篡改、过大请求直接拒绝。
+
+每份请求保留全部省略区间与未知身份；`context_complete` 仍只表示字面覆盖，语义充分性一直为 `not_approved`。旧请求不修改，新请求绑定独立 fingerprint 和 scope contract。`Model.extract_bounded_source(..., context_selection=selection)` 在计费前重建并验证，继续复用原预算账本，未接入生产 worker。
+
+离线入口：
+
+```sh
+python scripts/build_bounded_scope_request.py \
+  --input PRIVATE_ORIGINAL.json --selection PRIVATE_SELECTION.json \
+  --output PRIVATE_NEW_REQUEST.json
+```
+
+selection 包含 `purpose`（`instruction_only_negative` 或 `historical_speaker_correction`）、`base_request_id`、`source_canonical_sha256` 和 `context_ranges`（原 message_id/start/end）。原件支持完整信封或带 original_envelope 的既有开发收据。输出必须位于公共仓库外、0600、新建不覆盖；日志仅聚合，不打印原话和人物。
+
+真实开发材料形成 2 份限定用途请求，分别 13,599 与 14,040 DATA 字节；不是 token 数，不含系统提示和输出。另 1 份会议正文仍受人物边界与演示语音问题阻断。旧 3 个 partial 标记解除数为 0，真实模型调用数为 0，质量与个人事实均未批准。

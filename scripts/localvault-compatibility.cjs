@@ -66,6 +66,11 @@ async function patchedMain() {
   const oversized = { ...payload, messages: Array.from({ length: 100 }, (_, i) =>
     ({ id: String(i), role: 'external', text: '甲'.repeat(195) })) };
   check('patched_wire_boundary_detected_before_send', mapping.validatePayload(oversized).some(x => x.includes('24000')));
+  const asciiBoundary = { ...payload, messages: Array.from({ length: 100 }, (_, i) =>
+    ({ id: String(i), role: 'external', text: 'a'.repeat(195) })) };
+  assert.ok(Buffer.byteLength(JSON.stringify(asciiBoundary.messages), 'utf8') < 24000);
+  check('patched_ascii_separator_boundary_detected_before_send',
+    mapping.validatePayload(asciiBoundary).some(x => x.includes('24000')));
   let dropped = false;
   const retryClient = new MemoryCenterClient({ endpoint, token, maxRetries: 1,
     fetch: async (url, opts) => {

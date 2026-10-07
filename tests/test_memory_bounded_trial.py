@@ -78,3 +78,30 @@ class BoundedTrialTest(unittest.TestCase):
         with patch.object(Model,'configured',new_callable=PropertyMock,return_value=False):
             with self.assertRaisesRegex(Invalid,'模型未配置'):self.run_trial()
         self.assertEqual(budget.status(self.store,self.p,'personal')['tokens_spent'],0)
+
+    def test_scoped_trial_binds_selection_and_preserves_accounting(self):
+        from pipeline.memory_center.bounded_source_request import scoped_source_request
+        selection=dict(purpose='historical_speaker_correction',base_request_id=self.rid,
+            source_canonical_sha256=self.plan['source_canonical_sha256'],
+            context_ranges=[dict(message_id='original',start=0,end=len(self.env['messages'][0]['text']))])
+        bundle=scoped_source_request(self.env,self.plan,selection,version='2026-10-04.22')
+        self.enable()
+        with patch.object(self.model,'_call',return_value=({'claims':[]},{'total_tokens':17})) as call:
+            result,usage=self.model.extract_bounded_source(self.env,self.plan,bundle['request_id'],
+                self.p,'scoped-key',context_selection=selection)
+        self.assertEqual(usage['scope_contract_sha256'],bundle['request']['context_policy']['scope_contract_sha256'])
+        self.assertEqual(usage['request_fingerprint'],bundle['fingerprint'])
+        self.assertIn('server-defined extraction_purpose',call.call_args.args[0])
+        self.assertEqual(budget.status(self.store,self.p,'personal')['tokens_spent'],17)
+        self.assertFalse(usage['quality_approved'])
+
+    def test_scoped_mismatch_never_reserves_or_calls_model(self):
+        self.enable()
+        selection=dict(purpose='instruction_only_negative',base_request_id=self.rid,
+            source_canonical_sha256=self.plan['source_canonical_sha256'],
+            context_ranges=[dict(message_id='original',start=0,end=len(self.env['messages'][0]['text']))])
+        with patch.object(self.model,'_call') as call:
+            with self.assertRaises(Invalid):self.model.extract_bounded_source(self.env,self.plan,self.rid,
+                self.p,'bad-scoped-key',context_selection=selection)
+        call.assert_not_called()
+        self.assertEqual(budget.status(self.store,self.p,'personal')['tokens_spent'],0)

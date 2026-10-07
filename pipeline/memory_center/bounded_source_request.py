@@ -15,6 +15,11 @@ from .modality import CONDITION
 
 VERSION = 'bounded-original-source-request-v1'
 MAX_REQUEST_BYTES = 65536
+SCOPED_VERSION = 'bounded-purpose-context-v1'
+PURPOSES = {
+    'instruction_only_negative': 'Evaluate only whether the selected instruction states durable memory; an immediate analysis request alone should yield no claims.',
+    'historical_speaker_correction': 'Extract only the historical attribution explicitly stated in selected correction evidence. Preserve unknown identities; do not map transcript voices globally or assert current identity.',
+}
 
 
 def _canonical(value):
@@ -133,9 +138,100 @@ def plan_bounded_source_requests(envelope, archive_plan, *, version,
         'purpose': 'explicit_development_model_requests_not_worker_release'}
 
 
+def scoped_source_request(envelope, archive_plan, selection, *, version,
+                          max_request_bytes=MAX_REQUEST_BYTES):
+    """Rebuild a proposed, purpose-limited request from exact original ranges.
+
+    A selection is a review artifact, not a semantic approval. It cannot add
+    evidence, alter routing/roles, make omitted text complete or approve facts.
+    The base request and full source hash bind it to the original planning run.
+    """
+    if not isinstance(selection, dict) or selection.get('purpose') not in PURPOSES:
+        raise Invalid('需要受支持的限定用途复核')
+    if selection.get('source_canonical_sha256') != archive_plan.get('source_canonical_sha256'):
+        raise Invalid('限定用途复核与原件不匹配')
+    base = verified_bounded_source_request(envelope, archive_plan,
+        selection.get('base_request_id'), version=version,
+        max_request_bytes=max_request_bytes)
+    ranges = selection.get('context_ranges')
+    if not isinstance(ranges, list) or not 1 <= len(ranges) <= 64:
+        raise Invalid('语境范围必须为 1 到 64 个原件区间')
+    originals = {row['id']: row for row in envelope['messages']}
+    prepared, _, _ = prepare_request(archive_plan['source_type'], envelope['messages'],
+        version=version, source_metadata=archive_plan['source_metadata'])
+    routing = {row['id']: row for row in prepared['messages']}
+    coverage = {key: [] for key in originals}
+    normalized = []
+    for item in ranges:
+        if not isinstance(item, dict) or not isinstance(item.get('message_id'), str):
+            raise Invalid('语境原消息定位无效')
+        mid, start, end = item['message_id'], item.get('start'), item.get('end')
+        original = originals.get(mid)
+        if (original is None or type(start) is not int or type(end) is not int
+                or not 0 <= start < end <= len(original['text'])):
+            raise Invalid('语境偏移超出原件')
+        coverage[mid].append((start, end))
+    # Canonicalize selections, rejecting duplicate/overlapping ranges instead
+    # of allowing several encodings of the same context to masquerade as new.
+    context = []
+    omitted = []
+    for original in envelope['messages']:
+        mid = original['id']; cursor = 0
+        for start, end in sorted(coverage[mid]):
+            if start < cursor:
+                raise Invalid('语境区间重复或重叠')
+            if start > cursor:
+                omitted.append({'message_id': mid, 'start': cursor, 'end': start})
+            row = routing[mid]
+            normalized.append({'message_id': mid, 'start': start, 'end': end})
+            context.append({'message_id': mid, 'declared_role': original['role'],
+                'source_title': original.get('source_title'), 'created_at': original.get('created_at'),
+                'route': row['route'], 'reference_reason': row['reference_reason'],
+                'start': start, 'end': end, 'text': original['text'][start:end],
+                'original_text_sha256': hashlib.sha256(original['text'].encode()).hexdigest(),
+                'offset_unit': 'unicode_codepoint', 'author_identity_verified': False,
+                'purpose': 'source_context_not_selectable_evidence'})
+            cursor = end
+        if cursor < len(original['text']):
+            omitted.append({'message_id': mid, 'start': cursor, 'end': len(original['text'])})
+    # Every selectable quote must remain visible in its unchanged context.
+    for span in base['spans'].values():
+        if not any(start <= span['start'] and end >= span['end']
+                   for start, end in coverage[span['message_id']]):
+            raise Invalid('限定语境必须完整保留所有原证据')
+    contract = {'version': SCOPED_VERSION, 'purpose': selection['purpose'],
+        'source_canonical_sha256': archive_plan['source_canonical_sha256'],
+        'base_request_id': base['request_id'], 'context_ranges': normalized}
+    request = copy.deepcopy(base['request'])
+    request['source_context'] = context
+    request['extraction_purpose'] = PURPOSES[selection['purpose']]
+    request['context_policy'].update(context_complete=not omitted,
+        omitted_ranges=omitted,
+        omitted_message_ids=[mid for mid, intervals in coverage.items() if not intervals],
+        selection_method='agent_proposed_exact_source_ranges',
+        semantic_sufficiency='not_approved', scope_contract_sha256=_digest(contract),
+        current_identity_inference_forbidden=True, global_speaker_mapping_forbidden=True)
+    byte_count = len(json.dumps(request, ensure_ascii=False).encode('utf-8'))
+    if byte_count > max_request_bytes:
+        raise Invalid('限定用途语境超出请求字节上限；未截断')
+    binding = {key: copy.deepcopy(base[key]) for key in
+        ('method_version', 'source_key', 'scope', 'source_canonical_sha256', 'spans', 'routes')}
+    binding.update(planner_version=SCOPED_VERSION, request=request, scope_contract=contract)
+    fingerprint = _digest(binding)
+    return dict(binding, request_id='req:' + fingerprint, fingerprint=fingerprint,
+        request_bytes=byte_count, context_complete=not omitted, review_required=True,
+        automatic_extraction_authorized=False, quality_approved=False)
+
+
 def verified_bounded_source_request(envelope, archive_plan, request_id, *, version,
-                                    max_request_bytes=MAX_REQUEST_BYTES):
+                                    max_request_bytes=MAX_REQUEST_BYTES, context_selection=None):
     """Rebuild from originals instead of trusting caller-supplied evidence maps."""
+    if context_selection is not None:
+        bundle = scoped_source_request(envelope, archive_plan, context_selection,
+            version=version, max_request_bytes=max_request_bytes)
+        if bundle['request_id'] != request_id:
+            raise Invalid('请求标识与限定用途复核不匹配')
+        return bundle
     plan = plan_bounded_source_requests(envelope, archive_plan, version=version,
         max_request_bytes=max_request_bytes)
     for bundle in plan['requests']:

@@ -30,3 +30,11 @@ python scripts/evaluate_memory_trial_binding.py \
 8 项合成测试通过：冻结对象变化、旧评审失效、未知预留、费用超限、空正例、显式负例、独立性/覆盖缺失、CLI 私有权限与拒绝覆盖。
 
 本轮没有新真实模型产出或盲测结果，没有修改试跑预算。长文继承仍是离线复核协议，当前 worker 不接受它；下一步是经原件核对后构建兼容的有界模型请求、冻结小批试跑材料、配置有限评测预算并独立评分。
+
+## 2026-10-07：绑定实际输入窗口与负例要求
+
+原件和方法相同，不代表实际送入模型的语境相同。新有界请求合同必须冻结 `request_fingerprint`，采用限定用途时同时冻结 `scope_contract_sha256`；run 从实际调用回执携带同名字段。上下文窗口、用途或实际原文发生变化，旧评审必须失效。
+
+显式 v22 / `input_kind=bounded_source_request` 或带上述摘要的 run 均执行这个门槛；旧 v22 回执缺失输入指纹时报告 `unfrozen_bounded_input`，不能用旧通过结果放行。旧非有界合同的绑定摘要保持兼容。
+
+负例新增 `expected_output=empty` 并要求 `requires_nonempty_claims=false`，出现任何候选都阻断；正例可以显式指定 `expected_output=nonempty`。这与原有“负例允许为空”不同，能够阻止负例产生错误记忆仍被视为合格。全部校验仍不批准质量、个人事实或生产调度。

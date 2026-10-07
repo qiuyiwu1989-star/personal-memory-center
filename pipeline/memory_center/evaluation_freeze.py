@@ -10,8 +10,12 @@ def digest(value):
 
 def review_binding(run, contract):
     """Bind a review to the exact output and frozen source/configuration contract."""
-    return digest({'contract':contract,'output':{k:run.get(k) for k in
-        ('case_id','source_sha256','method_version','prompt_sha256','model_profile_sha256','claims')}})
+    output={k:run.get(k) for k in
+        ('case_id','source_sha256','method_version','prompt_sha256','model_profile_sha256','claims')}
+    # Preserve historical receipt hashes while binding actual bounded inputs
+    # for new trials. Same source/method can produce different context windows.
+    output.update({k:run[k] for k in ('request_fingerprint','scope_contract_sha256') if k in run})
+    return digest({'contract':contract,'output':output})
 
 
 def trial_readiness(manifest, runs):
@@ -26,6 +30,14 @@ def trial_readiness(manifest, runs):
         if case['case_id'] in contracts:raise ValueError('Duplicate frozen case')
         for k in ('source_sha256','prompt_sha256','model_profile_sha256'):
             if len(case[k])!=64 or any(c not in '0123456789abcdef' for c in case[k]):raise ValueError('Invalid digest')
+        if case.get('expected_output') not in (None,'empty','nonempty'):
+            raise ValueError('Invalid expected output contract')
+        if case.get('expected_output')=='empty' and case.get('requires_nonempty_claims') is not False:
+            raise ValueError('Empty expectation requires an explicit negative case')
+        for k in ('request_fingerprint','scope_contract_sha256'):
+            if k in case and (not isinstance(case[k],str) or len(case[k])!=64
+                              or any(c not in '0123456789abcdef' for c in case[k])):
+                raise ValueError('Invalid bounded input digest')
         contracts[case['case_id']]=case
     cap=manifest.get('token_limit')
     if type(cap) is not int or cap<=0:raise ValueError('Positive finite trial limit required')
@@ -50,6 +62,15 @@ def trial_readiness(manifest, runs):
         if len(items)!=1:reasons.append(cid+':missing_or_duplicate_run');continue
         run=items[0]
         if any(run.get(k)!=contract[k] for k in required):reasons.append(cid+':frozen_input_mismatch');continue
+        bounded=(contract.get('input_kind')=='bounded_source_request'
+                 or contract['method_version']=='2026-10-04.22'
+                 or 'request_fingerprint' in contract or 'request_fingerprint' in run
+                 or 'scope_contract_sha256' in contract or 'scope_contract_sha256' in run)
+        if bounded and not contract.get('request_fingerprint'):
+            reasons.append(cid+':unfrozen_bounded_input');continue
+        if bounded and (run.get('request_fingerprint')!=contract['request_fingerprint']
+                or run.get('scope_contract_sha256')!=contract.get('scope_contract_sha256')):
+            reasons.append(cid+':frozen_request_mismatch');continue
         claims=run.get('claims')
         if not isinstance(claims,list) or any(not isinstance(c,dict) for c in claims):
             reasons.append(cid+':invalid_output');continue
@@ -60,6 +81,10 @@ def trial_readiness(manifest, runs):
         # Positive cases must not pass by returning nothing. Review still judges semantics.
         if contract.get('requires_nonempty_claims') is not False and not claims:
             reasons.append(cid+':empty_positive_output')
+        if contract.get('expected_output')=='nonempty' and not claims:
+            reasons.append(cid+':empty_positive_output')
+        if contract.get('expected_output')=='empty' and claims:
+            reasons.append(cid+':nonempty_negative_output')
     if set(grouped)-set(contracts):reasons.append('unexpected_cases')
     return {'manifest_sha256':digest(manifest),'charged_or_reserved_tokens':charged,
             'unknown_usage_attempts':unknown,'blocking_reasons':sorted(set(reasons)),

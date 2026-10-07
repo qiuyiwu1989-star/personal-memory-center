@@ -65,3 +65,38 @@ class TrialBindingTest(unittest.TestCase):
             result=subprocess.run([sys.executable,str(script),'--manifest',str(manifest),'--runs',str(runs),'--output',str(out)],capture_output=True,text=True)
             self.assertEqual(result.returncode,2,result.stderr)
             self.assertFalse(json.loads(out.read_text())['quality_approved'])
+
+    def test_bounded_context_change_invalidates_frozen_input_and_review(self):
+        case=self.manifest['cases'][0]
+        case.update(input_kind='bounded_source_request',request_fingerprint=digest('original-window'),
+                    scope_contract_sha256=digest('original-purpose'))
+        self.run.update(request_fingerprint=case['request_fingerprint'],scope_contract_sha256=case['scope_contract_sha256'])
+        self.run['review']['binding_sha256']=review_binding(self.run,case)
+        self.assertTrue(self.result()['ready_for_quality_decision'])
+        self.run['request_fingerprint']=digest('different-window')
+        self.assertIn('synthetic:frozen_request_mismatch',self.result()['blocking_reasons'])
+        case['request_fingerprint']=self.run['request_fingerprint']
+        self.assertIn('synthetic:stale_or_missing_review',self.result()['blocking_reasons'])
+        self.run['review']['binding_sha256']=review_binding(self.run,case)
+        self.run['scope_contract_sha256']=digest('different-purpose')
+        self.assertIn('synthetic:frozen_request_mismatch',self.result()['blocking_reasons'])
+
+    def test_v22_missing_request_binding_blocks_even_with_semantic_pass(self):
+        self.run['method_version']=self.manifest['cases'][0]['method_version']='2026-10-04.22'
+        self.run['review']['binding_sha256']=review_binding(self.run,self.manifest['cases'][0])
+        self.assertIn('synthetic:unfrozen_bounded_input',self.result()['blocking_reasons'])
+
+    def test_negative_contract_rejects_nonempty_output(self):
+        case=self.manifest['cases'][0]
+        case.update(expected_output='empty',requires_nonempty_claims=False)
+        self.run['review']['binding_sha256']=review_binding(self.run,case)
+        self.assertIn('synthetic:nonempty_negative_output',self.result()['blocking_reasons'])
+        self.run['claims']=[];self.run['review']['binding_sha256']=review_binding(self.run,case)
+        self.assertTrue(self.result()['ready_for_quality_decision'])
+
+    def test_invalid_or_conflicting_bounded_contract_is_rejected(self):
+        self.manifest['cases'][0]['request_fingerprint']=True
+        with self.assertRaises(ValueError):self.result()
+        self.manifest['cases'][0].pop('request_fingerprint')
+        self.manifest['cases'][0]['expected_output']='empty'
+        with self.assertRaises(ValueError):self.result()

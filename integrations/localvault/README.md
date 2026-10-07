@@ -1,5 +1,46 @@
 # LocalVault compatibility repair package
 
+## 2026-10-07 current upstream follow-up
+
+The upstream main revision inspected this round is
+`de1e25be5026e03e01ff078b14a3639c185f2ad5`. Use
+[the refreshed patch](compatibility-de1e25b.patch) for that revision; do not
+apply the old patch on top. Public source blobs were verified against their Git
+object hashes. Only an isolated source copy was modified, not a user installation
+or the upstream repository.
+
+Upstream now handles HTTP200 tool errors, parses JSON text, and rejects unknown
+top-level payload fields. Its current fake-endpoint suite passes **96** assertions.
+Real loopback verification still fails at `patched_source_job_receipt_persisted`:
+the parser recognizes `source_id` but the center returns `id`. The refresh adds
+strict source/job acknowledgements, the actual parent metadata field and job-only
+status arguments. It also accounts for Python JSON separator spaces; UTF-8 bytes
+alone do not cover the ASCII boundary. The existing UTF-8 limit stays as an extra
+conservative local cap, and control-character splitting gets more headroom.
+
+The refreshed isolated copy passes **15 real HTTP checks** (including the new
+ASCII separator boundary), with **13 synthetic archived sources**, **zero model
+calls**, and retains **96/96** upstream assertions. These counts are distinct
+from the previous 14/84 reports below. A missing entry file during initial
+snapshot setup was corrected before running the upstream suite; it was not an
+upstream product failure.
+
+Next handoff: apply the refreshed patch to the matching revision, implement the
+source egress policy from the revised node plan, and run 3–5 authorized real
+sources with the actual installation. No real-source quality, live credential,
+egress gate or automatic production sync is certified by the synthetic checks.
+
+```sh
+# In a clean checkout of de1e25be5026e03e01ff078b14a3639c185f2ad5:
+git apply --check /path/to/personal-memory-center/integrations/localvault/compatibility-de1e25b.patch
+git apply /path/to/personal-memory-center/integrations/localvault/compatibility-de1e25b.patch
+# From the memory-center repository:
+.venv/bin/python scripts/check_localvault_compatibility.py /path/to/localvault-checkout --patched
+node /path/to/localvault-checkout/mcp-server/test/upstream.js
+```
+
+## Previous pinned revision and historical results
+
 Reviewable adapter patch for LocalVault source revision `73be4988553be167ea7073458b1f2bc70ab5a3af` (2026-10-05).
 No user installation, credentials, personal documents or remote LocalVault
 repository was changed.
