@@ -1,11 +1,13 @@
 # LocalVault compatibility repair package
 
-## New center interfaces (development, 2026-10-07)
+## New center interfaces (deployed on qiuyiwu.com, 2026-10-07)
 
 The center now implements optional source-bound candidate submission, scoped
 capabilities and metadata checkpoints. See [the candidate contract](../../docs/UPSTREAM-CANDIDATE-INTAKE.md)
-and [rollout order](../../docs/INTERFACE-EXPANSION-2026-10-07.md). These changes are
-locally verified, not proof that production or a LocalVault installation has them.
+and [rollout order](../../docs/INTERFACE-EXPANSION-2026-10-07.md). The stable production
+overlay passed separate PostgreSQL rehearsal/migration and public MCP acceptance;
+see [the release record](../../docs/INTERFACE-PRODUCTION-2026-10-07.md). This does not
+prove that a LocalVault installation has implemented the new client protocol.
 
 After the existing archive receipt, a separately authorized single-inbox writer
 can submit up to 20 candidate claims with exact message IDs and Unicode quote
